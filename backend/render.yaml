@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: macro-intelligence-ai-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+      - key: TWELVEDATA_API_KEY
+        sync: false
+      - key: REFRESH_TOKEN
+        sync: false

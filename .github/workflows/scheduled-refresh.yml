@@ -1,0 +1,43 @@
+name: Scheduled data refresh
+
+# Runs every module's refresh endpoint in dependency order — raw data and
+# the shared market_prices bars first, then the three Top-Down Analysis
+# perspectives, then AI Decision (reads all of it), then Historical
+# Learning (grades old decisions), then Performance and Notifications
+# (read the results of both). On the free tier this single workflow also
+# doubles as the keep-warm ping for Render and Supabase (see
+# backend/app/scheduler.py for the full explanation).
+#
+# Requires two repo secrets (Settings > Secrets and variables > Actions):
+#   BACKEND_URL      e.g. https://macro-intelligence-ai-backend.onrender.com
+#   REFRESH_TOKEN    must match REFRESH_TOKEN in the backend's env vars
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # hourly — well inside Render's 750 free hours/month
+  workflow_dispatch: {}    # lets you trigger it manually from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run refresh chain in dependency order
+        run: |
+          set -e
+          refresh () {
+            echo "-> $1"
+            curl -sf -X POST "${{ secrets.BACKEND_URL }}/api/$1/refresh" \
+              -H "X-Refresh-Token: ${{ secrets.REFRESH_TOKEN }}" \
+              || echo "   $1 refresh failed — check backend logs on Render"
+          }
+          refresh treasury
+          refresh rates
+          refresh dxy
+          refresh news
+          refresh market-data
+          refresh ict
+          refresh top-down
+          refresh ai-decision
+          refresh history
+          refresh performance
+          refresh notifications
