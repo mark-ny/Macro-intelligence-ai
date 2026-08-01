@@ -25,7 +25,7 @@ This creates a private advisory that only the maintainer(s) can see until it's r
 ### Alternative: Direct Email
 If you're unable to use GitHub's private reporting feature, email:
 
-**[macrointeligence@gmail.com]** *(replace with your preferred contact email)*
+**[macrointeligence@gmail.com]** 
 
 Please include "SECURITY" in the subject line.
 
