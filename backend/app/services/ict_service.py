@@ -226,6 +226,92 @@ def detect_order_blocks(bars: list[dict], shifts: list[dict]) -> list[dict]:
 
     return blocks
 
+ def calculate_institutional_bias(
+    structure: dict,
+    signals: list[dict],
+) -> dict:
+    """
+    Produces the overall institutional bias.
+
+    Returns:
+        bias
+        confidence
+        score
+    """
+
+    score = 0
+
+    # -------------------------
+    # Market Structure
+    # -------------------------
+
+    if structure["trend"] == "BULLISH":
+        score += 40
+
+    elif structure["trend"] == "BEARISH":
+        score -= 40
+
+    if structure["bos"]:
+        score += 15 if structure["trend"] == "BULLISH" else -15
+
+    if structure["choch"]:
+        score += 10 if structure["trend"] == "BULLISH" else -10
+
+    # -------------------------
+    # Signal Scoring
+    # -------------------------
+
+    for signal in signals:
+
+        if signal["type"] == "fair_value_gap":
+
+            if signal["direction"] == "bullish":
+                score += 4
+            else:
+                score -= 4
+
+        elif signal["type"] == "liquidity_sweep":
+
+            if signal["direction"] == "bullish":
+                score += 8
+            else:
+                score -= 8
+
+        elif signal["type"] == "order_block":
+
+            if signal["direction"] == "bullish":
+                score += 10
+            else:
+                score -= 10
+
+        elif signal["type"] == "market_structure_shift":
+
+            if signal["direction"] == "bullish":
+                score += 12
+            else:
+                score -= 12
+
+    # -------------------------
+    # Final Bias
+    # -------------------------
+
+    if score >= 40:
+        bias = "BUY"
+
+    elif score <= -40:
+        bias = "SELL"
+
+    else:
+        bias = "WAIT"
+
+    confidence = min(abs(score), 100)
+
+    return {
+        "bias": bias,
+        "confidence": confidence,
+        "score": score,
+    }
+
 
 def _run_all_detectors(bars: list[dict]) -> tuple[list[dict], dict]:
 
@@ -257,20 +343,40 @@ async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
                 errors[asset] = "Not enough stored bars yet — run POST /api/market-data/refresh first."
                 continue
             signals, structure = _run_all_detectors(bars)
+          bias = calculate_institutional_bias(
+              structure,
+              signals,
+        )
         except Exception as exc:  # noqa: BLE001
             errors[asset] = str(exc)
             continue
 
         for signal in signals:
             rows.append({
-                "asset": asset,
-                "timeframe": "1D",
-                "signal_type": signal["type"],
-                "direction": signal["direction"],
-                "price_level": signal["price"],
-                "detected_at": signal["datetime"],
-                "notes": signal.get("notes"),
-            })
+
+    "asset": asset,
+
+    "timeframe": "1D",
+
+    "signal_type": signal["type"],
+
+    "direction": signal["direction"],
+
+    "price_level": signal["price"],
+
+    "detected_at": signal["datetime"],
+
+    "notes": signal.get("notes"),
+
+    "confidence": bias["confidence"],
+
+    "institutional_bias": bias["bias"],
+
+    "market_trend": structure["trend"],
+
+    "trend_strength": structure["strength"],
+
+})
 
     if rows:
         for i in range(0, len(rows), 500):
