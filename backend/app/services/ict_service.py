@@ -317,18 +317,20 @@ def _run_all_detectors(bars: list[dict]) -> tuple[list[dict], dict]:
 
     swings = detect_swings(bars)
 
-    structure = classify_market_structure(swings)
+   range_data = calculate_dealing_range(swings)
 
-    shifts = detect_market_structure_shifts(bars, swings)
+    structure = detect_market_structure(bars, swings)
+
 
     signals = [
         *detect_fair_value_gaps(bars),
         *detect_liquidity_sweeps(bars, swings),
-        *shifts,
-        *detect_order_blocks(bars, shifts),
+        *detect_market_structure_shifts(bars, swings),
+        *detect_order_blocks(bars,
+      detect_market_structure_shifts(bars, swings)),
     ]
 
-    return signals, structure
+    return signals, structure, range_data
 
 
   def build_learning_record(
@@ -470,6 +472,64 @@ async def evaluate_learning_records(
     }
 
 
+def calculate_dealing_range(swings: list[dict]) -> dict | None:
+    """
+    Uses the most recent confirmed swing high and swing low
+    to define the current dealing range.
+    """
+
+    highs = [s for s in swings if s["type"] == "swing_high"]
+    lows = [s for s in swings if s["type"] == "swing_low"]
+
+    if not highs or not lows:
+        return None
+
+    latest_high = highs[-1]
+    latest_low = lows[-1]
+
+    high = latest_high["price"]
+    low = latest_low["price"]
+
+    premium = low + (high - low) * 0.5
+
+    return {
+        "high": high,
+        "low": low,
+        "equilibrium": premium,
+    }
+
+
+def calculate_ote(range_data: dict) -> dict:
+    """
+    ICT Optimal Trade Entry (62%-79% retracement zone).
+    """
+
+    high = range_data["high"]
+    low = range_data["low"]
+
+    diff = high - low
+
+    return {
+        "buy_ote_low": high - diff * 0.79,
+        "buy_ote_high": high - diff * 0.62,
+        "sell_ote_low": low + diff * 0.62,
+        "sell_ote_high": low + diff * 0.79,
+    }
+
+
+def classify_price_location(price: float, range_data: dict) -> str:
+    """
+    Premium / Discount classification.
+    """
+
+    if price > range_data["equilibrium"]:
+        return "PREMIUM"
+
+    if price < range_data["equilibrium"]:
+        return "DISCOUNT"
+
+    return "EQUILIBRIUM"
+
 
 async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
     supabase = get_supabase()
@@ -522,6 +582,16 @@ async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
     "market_trend": structure["trend"],
 
     "trend_strength": structure["strength"],
+
+    "premium_discount": price_location,
+
+    "buy_ote_low": ote["buy_ote_low"],
+
+    "buy_ote_high": ote["buy_ote_high"],
+
+    "sell_ote_low": ote["sell_ote_low"],
+
+    "sell_ote_high": ote["sell_ote_high"],
 
 })
 
