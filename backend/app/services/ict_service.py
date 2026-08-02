@@ -331,9 +331,150 @@ def _run_all_detectors(bars: list[dict]) -> tuple[list[dict], dict]:
     return signals, structure
 
 
+  def build_learning_record(
+    asset: str,
+    structure: dict,
+    bias: dict,
+    signal: dict,
+) -> dict:
+    """
+    Creates a reinforcement-learning record.
+    """
+
+    return {
+        "asset": asset,
+        "timeframe": "1D",
+
+        "prediction": bias["bias"],
+        "confidence": bias["confidence"],
+
+        "trend": structure["trend"],
+        "trend_strength": structure["strength"],
+
+        "bos": structure["bos"],
+        "choch": structure["choch"],
+        "mss": structure["mss"],
+
+        "hh": structure["hh"],
+        "hl": structure["hl"],
+        "lh": structure["lh"],
+        "ll": structure["ll"],
+
+        "signal_type": signal["type"],
+        "signal_direction": signal["direction"],
+
+        "price": signal["price"],
+
+        "detected_at": signal["datetime"],
+
+        "status": "PENDING",
+
+        "actual_direction": None,
+
+        "result": None,
+
+        "reward": 0.0,
+    }
+
+
+async def evaluate_learning_records(
+    look_forward_bars: int = 10,
+) -> dict:
+    """
+    Evaluates pending reinforcement-learning records and assigns rewards.
+    """
+
+    supabase = get_supabase()
+
+    pending = (
+        supabase.table("reinforcement_learning")
+        .select("*")
+        .eq("status", "PENDING")
+        .execute()
+        .data
+    )
+
+    evaluated = 0
+
+    for record in pending:
+
+        asset = record["asset"]
+
+        bars = await get_stored_bars(asset, days_back=30)
+
+        if not bars:
+            continue
+
+        future = [
+            b for b in bars
+            if b["datetime"] > record["detected_at"]
+        ]
+
+        if len(future) < look_forward_bars:
+            continue
+
+        future = future[:look_forward_bars]
+
+        entry = record["price"]
+
+        highest = max(x["high"] for x in future)
+        lowest = min(x["low"] for x in future)
+
+        prediction = record["prediction"]
+
+        reward = 0
+        result = "LOSS"
+        actual = "RANGE"
+
+        if prediction == "BUY":
+
+            if highest > entry:
+                reward = highest - entry
+                result = "WIN"
+                actual = "BUY"
+
+            else:
+                reward = lowest - entry
+                actual = "SELL"
+
+        elif prediction == "SELL":
+
+            if lowest < entry:
+                reward = entry - lowest
+                result = "WIN"
+                actual = "SELL"
+
+            else:
+                reward = entry - highest
+                actual = "BUY"
+
+        supabase.table("reinforcement_learning").update({
+
+            "status": "COMPLETE",
+
+            "reward": reward,
+
+            "result": result,
+
+            "actual_direction": actual,
+
+        }).eq(
+            "id",
+            record["id"],
+        ).execute()
+
+        evaluated += 1
+
+    return {
+        "evaluated": evaluated
+    }
+
+
+
 async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
     supabase = get_supabase()
     rows: list[dict] = []
+    learning_rows = []
     errors: dict[str, str] = {}
 
     for asset in ASSET_SYMBOLS:
@@ -352,6 +493,12 @@ async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
             continue
 
         for signal in signals:
+          learning_row = build_learning_record(
+              assets,
+              structure,
+              bias,
+              signal,
+          )
             rows.append({
 
     "asset": asset,
@@ -377,6 +524,20 @@ async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
     "trend_strength": structure["strength"],
 
 })
+
+learning_row.append(
+    learning_row
+)
+
+
+if learning_rows:
+  for i in range(0, len(learning_rows), 500):
+
+     supabase.table(
+        "reinforcement_learning"
+     ).upsert(
+        learning_rows[i:i+500]
+     ).execute()
 
     if rows:
         for i in range(0, len(rows), 500):
