@@ -100,36 +100,104 @@ def detect_liquidity_sweeps(bars: list[dict], swings: list[dict]) -> list[dict]:
     return sweeps
 
 
-def detect_market_structure_shifts(bars: list[dict], swings: list[dict]) -> list[dict]:
-    """A close beyond the most recent confirmed swing high/low — signals a
-    potential change in trend direction."""
-    shifts = []
-    prior_swing_high = prior_swing_low = None
-    swing_by_index = {s["index"]: s for s in swings}
+def classify_market_structure(swings: list[dict]) -> dict:
+    """
+    Classifies the latest confirmed market structure.
 
-    for i, bar in enumerate(bars):
-        if i in swing_by_index:
-            s = swing_by_index[i]
-            if s["type"] == "swing_high":
-                prior_swing_high = s["price"]
-            else:
-                prior_swing_low = s["price"]
-            continue
+    Returns:
+        trend
+        hh
+        hl
+        lh
+        ll
+        bos
+        choch
+        mss
+        strength
+    """
 
-        if prior_swing_high is not None and bar["close"] > prior_swing_high:
-            shifts.append({
-                "type": "market_structure_shift", "direction": "bullish", "price": prior_swing_high,
-                "datetime": bar["datetime"], "notes": f"Closed above prior swing high {prior_swing_high:.2f}",
-            })
-            prior_swing_high = None  # consumed — wait for the next one
-        if prior_swing_low is not None and bar["close"] < prior_swing_low:
-            shifts.append({
-                "type": "market_structure_shift", "direction": "bearish", "price": prior_swing_low,
-                "datetime": bar["datetime"], "notes": f"Closed below prior swing low {prior_swing_low:.2f}",
-            })
-            prior_swing_low = None
+    highs = [s for s in swings if s["type"] == "swing_high"]
+    lows = [s for s in swings if s["type"] == "swing_low"]
 
-    return shifts
+    if len(highs) < 2 or len(lows) < 2:
+        return {
+            "trend": "UNKNOWN",
+            "hh": False,
+            "hl": False,
+            "lh": False,
+            "ll": False,
+            "bos": False,
+            "choch": False,
+            "mss": False,
+            "strength": 0,
+        }
+
+    last_high = highs[-1]["price"]
+    prev_high = highs[-2]["price"]
+
+    last_low = lows[-1]["price"]
+    prev_low = lows[-2]["price"]
+
+    hh = last_high > prev_high
+    hl = last_low > prev_low
+
+    lh = last_high < prev_high
+    ll = last_low < prev_low
+
+    trend = "RANGE"
+
+    if hh and hl:
+        trend = "BULLISH"
+
+    elif lh and ll:
+        trend = "BEARISH"
+
+    bos = (
+        (trend == "BULLISH" and hh)
+        or
+        (trend == "BEARISH" and ll)
+    )
+
+    choch = (
+        (hh and ll)
+        or
+        (lh and hl)
+    )
+
+    mss = choch
+
+    strength = 50
+
+    if trend != "RANGE":
+        strength += 20
+
+    if bos:
+        strength += 10
+
+    if choch:
+        strength += 10
+
+    if hh and hl:
+        strength += 5
+
+    if lh and ll:
+        strength += 5
+
+    strength = min(strength, 100)
+
+    return {
+        "trend": trend,
+        "hh": hh,
+        "hl": hl,
+        "lh": lh,
+        "ll": ll,
+        "bos": bos,
+        "choch": choch,
+        "mss": mss,
+        "strength": strength,
+        "last_high": last_high,
+        "last_low": last_low,
+    }
 
 
 def detect_order_blocks(bars: list[dict], shifts: list[dict]) -> list[dict]:
@@ -159,16 +227,22 @@ def detect_order_blocks(bars: list[dict], shifts: list[dict]) -> list[dict]:
     return blocks
 
 
-def _run_all_detectors(bars: list[dict]) -> list[dict]:
+def _run_all_detectors(bars: list[dict]) -> tuple[list[dict], dict]:
+
     swings = detect_swings(bars)
+
+    structure = classify_market_structure(swings)
+
     shifts = detect_market_structure_shifts(bars, swings)
+
     signals = [
         *detect_fair_value_gaps(bars),
         *detect_liquidity_sweeps(bars, swings),
         *shifts,
         *detect_order_blocks(bars, shifts),
     ]
-    return signals
+
+    return signals, structure
 
 
 async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
@@ -182,7 +256,7 @@ async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
             if len(bars) < 2 * SWING_WINDOW + 1:
                 errors[asset] = "Not enough stored bars yet — run POST /api/market-data/refresh first."
                 continue
-            signals = _run_all_detectors(bars)
+            signals, structure = _run_all_detectors(bars)
         except Exception as exc:  # noqa: BLE001
             errors[asset] = str(exc)
             continue
