@@ -191,11 +191,73 @@ async def refresh_economic_calendar(days_ahead: int = 60) -> dict:
     return {"calendar_events_upserted": len(rows)}
 
 
+import logging
+import traceback
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
 async def refresh_news_data() -> dict:
-    """Combined refresh — called by the scheduler and by POST /api/news/refresh."""
-    headlines_result = await refresh_news_headlines()
-    calendar_result = await refresh_economic_calendar()
-    return {**headlines_result, **calendar_result}
+    """
+    Refresh headlines and the economic calendar.
+
+    Runs each refresh independently so one failure does not prevent the other.
+    Returns detailed diagnostics instead of causing an HTTP 500.
+    """
+
+    response = {
+        "success": True,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "headlines": {},
+        "calendar": {},
+        "errors": [],
+    }
+
+    # Refresh headlines
+    try:
+        logger.info("Refreshing economic headlines...")
+        headlines_result = await refresh_news_headlines()
+        response["headlines"] = headlines_result
+        logger.info("Headlines refresh completed.")
+    except Exception as e:
+        logger.exception("Headlines refresh failed")
+        traceback.print_exc()
+
+        response["success"] = False
+        response["headlines"] = {
+            "status": "failed",
+            "error": str(e),
+        }
+
+        response["errors"].append({
+            "module": "headlines",
+            "message": str(e),
+        })
+
+    # Refresh calendar
+    try:
+        logger.info("Refreshing economic calendar...")
+        calendar_result = await refresh_economic_calendar()
+        response["calendar"] = calendar_result
+        logger.info("Calendar refresh completed.")
+    except Exception as e:
+        logger.exception("Calendar refresh failed")
+        traceback.print_exc()
+
+        response["success"] = False
+        response["calendar"] = {
+            "status": "failed",
+            "error": str(e),
+        }
+
+        response["errors"].append({
+            "module": "calendar",
+            "message": str(e),
+        })
+
+    logger.info("News refresh finished.")
+
+    return response
 
 
 @ttl_cache(seconds=600)
