@@ -26,102 +26,217 @@ same logic on resampled weekly/monthly bars.
 """
 from app.cache import ttl_cache
 from app.database import get_supabase
-from app.services.market_data_service import ASSET_SYMBOLS, get_stored_bars
+from app.services.market_data_service import (
+    ASSET_SYMBOLS,
+    get_stored_bars,
+)
 
-SWING_WINDOW = 3  # bars required on each side to confirm a pivot
+SWING_WINDOW = 3
 
 
-def detect_swings(bars: list[dict], window: int = SWING_WINDOW) -> list[dict]:
-    """Fractal swing highs/lows: a pivot needs `window` bars on both sides
-    that are all lower (swing high) or all higher (swing low)."""
+# ============================================================
+# SWING DETECTION
+# ============================================================
+
+def detect_swings(
+    bars: list[dict],
+    window: int = SWING_WINDOW,
+) -> list[dict]:
+    """
+    Detect confirmed swing highs and swing lows using
+    ICT fractal confirmation.
+    """
+
     swings = []
-    for i in range(window, len(bars) - window):
-        left, right = bars[i - window : i], bars[i + 1 : i + 1 + window]
 
-        if all(bars[i]["high"] > b["high"] for b in left + right):
-            swings.append({"index": i, "type": "swing_high", "price": bars[i]["high"], "datetime": bars[i]["datetime"]})
-        elif all(bars[i]["low"] < b["low"] for b in left + right):
-            swings.append({"index": i, "type": "swing_low", "price": bars[i]["low"], "datetime": bars[i]["datetime"]})
+    for i in range(window, len(bars) - window):
+
+        left = bars[i - window:i]
+        right = bars[i + 1:i + 1 + window]
+
+        if all(
+            bars[i]["high"] > x["high"]
+            for x in left + right
+        ):
+            swings.append(
+                {
+                    "index": i,
+                    "type": "swing_high",
+                    "price": bars[i]["high"],
+                    "datetime": bars[i]["datetime"],
+                }
+            )
+
+        elif all(
+            bars[i]["low"] < x["low"]
+            for x in left + right
+        ):
+            swings.append(
+                {
+                    "index": i,
+                    "type": "swing_low",
+                    "price": bars[i]["low"],
+                    "datetime": bars[i]["datetime"],
+                }
+            )
 
     return swings
 
 
-def detect_fair_value_gaps(bars: list[dict]) -> list[dict]:
-    """3-candle imbalance: candle i-1 and i+1 don't overlap, leaving a gap
-    candle i's range didn't fill."""
+# ============================================================
+# FAIR VALUE GAPS
+# ============================================================
+
+def detect_fair_value_gaps(
+    bars: list[dict],
+) -> list[dict]:
+
     gaps = []
+
     for i in range(1, len(bars) - 1):
-        prev_bar, next_bar = bars[i - 1], bars[i + 1]
-        if next_bar["low"] > prev_bar["high"]:
-            gaps.append({
-                "type": "fair_value_gap", "direction": "bullish",
-                "price": (next_bar["low"] + prev_bar["high"]) / 2,
-                "datetime": bars[i]["datetime"],
-                "notes": f"Gap between {prev_bar['high']:.2f} and {next_bar['low']:.2f}",
-            })
-        elif next_bar["high"] < prev_bar["low"]:
-            gaps.append({
-                "type": "fair_value_gap", "direction": "bearish",
-                "price": (next_bar["high"] + prev_bar["low"]) / 2,
-                "datetime": bars[i]["datetime"],
-                "notes": f"Gap between {next_bar['high']:.2f} and {prev_bar['low']:.2f}",
-            })
+
+        previous = bars[i - 1]
+        current = bars[i]
+        nxt = bars[i + 1]
+
+        if nxt["low"] > previous["high"]:
+
+            gaps.append(
+                {
+                    "type": "fair_value_gap",
+                    "direction": "bullish",
+                    "price": (
+                        previous["high"]
+                        + nxt["low"]
+                    ) / 2,
+                    "datetime": current["datetime"],
+                    "notes": (
+                        f"Gap between "
+                        f"{previous['high']:.2f}"
+                        f" and "
+                        f"{nxt['low']:.2f}"
+                    ),
+                }
+            )
+
+        elif nxt["high"] < previous["low"]:
+
+            gaps.append(
+                {
+                    "type": "fair_value_gap",
+                    "direction": "bearish",
+                    "price": (
+                        previous["low"]
+                        + nxt["high"]
+                    ) / 2,
+                    "datetime": current["datetime"],
+                    "notes": (
+                        f"Gap between "
+                        f"{nxt['high']:.2f}"
+                        f" and "
+                        f"{previous['low']:.2f}"
+                    ),
+                }
+            )
+
     return gaps
 
 
-def detect_liquidity_sweeps(bars: list[dict], swings: list[dict]) -> list[dict]:
-    """A bar wicks beyond the most recent prior swing high/low but closes
-    back inside it — a classic ICT "stop hunt" before reversal."""
-    sweeps = []
-    prior_swing_high = prior_swing_low = None
+# ============================================================
+# LIQUIDITY SWEEPS
+# ============================================================
 
-    swing_by_index = {s["index"]: s for s in swings}
-    for i, bar in enumerate(bars):
-        if i in swing_by_index:
-            s = swing_by_index[i]
-            if s["type"] == "swing_high":
-                prior_swing_high = s["price"]
+def detect_liquidity_sweeps(
+    bars: list[dict],
+    swings: list[dict],
+) -> list[dict]:
+
+    sweeps = []
+
+    previous_high = None
+    previous_low = None
+
+    swing_lookup = {
+        s["index"]: s
+        for s in swings
+    }
+
+    for i, candle in enumerate(bars):
+
+        if i in swing_lookup:
+
+            swing = swing_lookup[i]
+
+            if swing["type"] == "swing_high":
+                previous_high = swing["price"]
             else:
-                prior_swing_low = s["price"]
+                previous_low = swing["price"]
+
             continue
 
-        if prior_swing_high is not None and bar["high"] > prior_swing_high and bar["close"] < prior_swing_high:
-            sweeps.append({
-                "type": "liquidity_sweep", "direction": "bearish", "price": prior_swing_high,
-                "datetime": bar["datetime"],
-                "notes": f"Wicked above {prior_swing_high:.2f}, closed back below",
-            })
-        if prior_swing_low is not None and bar["low"] < prior_swing_low and bar["close"] > prior_swing_low:
-            sweeps.append({
-                "type": "liquidity_sweep", "direction": "bullish", "price": prior_swing_low,
-                "datetime": bar["datetime"],
-                "notes": f"Wicked below {prior_swing_low:.2f}, closed back above",
-            })
+        if (
+            previous_high is not None
+            and candle["high"] > previous_high
+            and candle["close"] < previous_high
+        ):
+
+            sweeps.append(
+                {
+                    "type": "liquidity_sweep",
+                    "direction": "bearish",
+                    "price": previous_high,
+                    "datetime": candle["datetime"],
+                    "notes": (
+                        f"Liquidity taken above "
+                        f"{previous_high:.2f}"
+                    ),
+                }
+            )
+
+        if (
+            previous_low is not None
+            and candle["low"] < previous_low
+            and candle["close"] > previous_low
+        ):
+
+            sweeps.append(
+                {
+                    "type": "liquidity_sweep",
+                    "direction": "bullish",
+                    "price": previous_low,
+                    "datetime": candle["datetime"],
+                    "notes": (
+                        f"Liquidity taken below "
+                        f"{previous_low:.2f}"
+                    ),
+                }
+            )
+
     return sweeps
 
 
-def classify_market_structure(swings: list[dict]) -> dict:
-    """
-    Classifies the latest confirmed market structure.
+# ============================================================
+# MARKET STRUCTURE
+# ============================================================
 
-    Returns:
-        trend
-        hh
-        hl
-        lh
-        ll
-        bos
-        choch
-        mss
-        strength
-    """
+def classify_market_structure(
+    swings: list[dict],
+) -> dict:
 
-    highs = [s for s in swings if s["type"] == "swing_high"]
-    lows = [s for s in swings if s["type"] == "swing_low"]
+    highs = [
+        x for x in swings
+        if x["type"] == "swing_high"
+    ]
+
+    lows = [
+        x for x in swings
+        if x["type"] == "swing_low"
+    ]
 
     if len(highs) < 2 or len(lows) < 2:
+
         return {
-            "trend": "UNKNOWN",
+            "trend": "RANGE",
             "hh": False,
             "hl": False,
             "lh": False,
@@ -130,19 +245,21 @@ def classify_market_structure(swings: list[dict]) -> dict:
             "choch": False,
             "mss": False,
             "strength": 0,
+            "last_high": None,
+            "last_low": None,
         }
 
     last_high = highs[-1]["price"]
-    prev_high = highs[-2]["price"]
+    previous_high = highs[-2]["price"]
 
     last_low = lows[-1]["price"]
-    prev_low = lows[-2]["price"]
+    previous_low = lows[-2]["price"]
 
-    hh = last_high > prev_high
-    hl = last_low > prev_low
+    hh = last_high > previous_high
+    hl = last_low > previous_low
 
-    lh = last_high < prev_high
-    ll = last_low < prev_low
+    lh = last_high < previous_high
+    ll = last_low < previous_low
 
     trend = "RANGE"
 
@@ -153,9 +270,11 @@ def classify_market_structure(swings: list[dict]) -> dict:
         trend = "BEARISH"
 
     bos = (
-        (trend == "BULLISH" and hh)
-        or
-        (trend == "BEARISH" and ll)
+        trend == "BULLISH"
+        and hh
+    ) or (
+        trend == "BEARISH"
+        and ll
     )
 
     choch = (
@@ -164,24 +283,16 @@ def classify_market_structure(swings: list[dict]) -> dict:
         (lh and hl)
     )
 
-    mss = choch
-
     strength = 50
 
     if trend != "RANGE":
         strength += 20
 
     if bos:
-        strength += 10
+        strength += 15
 
     if choch:
-        strength += 10
-
-    if hh and hl:
-        strength += 5
-
-    if lh and ll:
-        strength += 5
+        strength += 15
 
     strength = min(strength, 100)
 
@@ -193,57 +304,243 @@ def classify_market_structure(swings: list[dict]) -> dict:
         "ll": ll,
         "bos": bos,
         "choch": choch,
-        "mss": mss,
+        "mss": choch,
         "strength": strength,
         "last_high": last_high,
         "last_low": last_low,
     }
 
+ # ============================================================
+# MARKET STRUCTURE SHIFTS (BOS / CHOCH)
+# ============================================================
 
-def detect_order_blocks(bars: list[dict], shifts: list[dict]) -> list[dict]:
-    """The last opposite-colored candle before a market structure shift —
-    a simplified, widely used definition of an ICT order block."""
-    blocks = []
-    bars_by_datetime = {b["datetime"]: i for i, b in enumerate(bars)}
+def detect_market_structure_shifts(
+    bars: list[dict],
+    swings: list[dict],
+) -> list[dict]:
 
-    for shift in shifts:
-        shift_index = bars_by_datetime.get(shift["datetime"])
-        if shift_index is None:
+    shifts = []
+
+    previous_high = None
+    previous_low = None
+
+    swing_lookup = {
+        s["index"]: s
+        for s in swings
+    }
+
+    for i, candle in enumerate(bars):
+
+        if i in swing_lookup:
+
+            swing = swing_lookup[i]
+
+            if swing["type"] == "swing_high":
+                previous_high = swing["price"]
+            else:
+                previous_low = swing["price"]
+
             continue
 
-        wanted_color = "bearish" if shift["direction"] == "bullish" else "bullish"
-        for j in range(shift_index - 1, max(shift_index - 10, -1), -1):
-            candle = bars[j]
-            color = "bullish" if candle["close"] >= candle["open"] else "bearish"
-            if color == wanted_color:
-                blocks.append({
-                    "type": "order_block", "direction": shift["direction"],
-                    "price": candle["low"] if shift["direction"] == "bullish" else candle["high"],
+        if (
+            previous_high is not None
+            and candle["close"] > previous_high
+        ):
+
+            shifts.append(
+                {
+                    "type": "market_structure_shift",
+                    "direction": "bullish",
+                    "price": previous_high,
                     "datetime": candle["datetime"],
-                    "notes": f"Last {wanted_color} candle before the {shift['datetime']} structure shift",
-                })
-                break
+                    "notes": f"Closed above {previous_high:.2f}",
+                }
+            )
+
+            previous_high = None
+
+        if (
+            previous_low is not None
+            and candle["close"] < previous_low
+        ):
+
+            shifts.append(
+                {
+                    "type": "market_structure_shift",
+                    "direction": "bearish",
+                    "price": previous_low,
+                    "datetime": candle["datetime"],
+                    "notes": f"Closed below {previous_low:.2f}",
+                }
+            )
+
+            previous_low = None
+
+    return shifts
+
+
+# ============================================================
+# ORDER BLOCKS
+# ============================================================
+
+def detect_order_blocks(
+    bars: list[dict],
+    shifts: list[dict],
+) -> list[dict]:
+
+    blocks = []
+
+    lookup = {
+        b["datetime"]: i
+        for i, b in enumerate(bars)
+    }
+
+    for shift in shifts:
+
+        index = lookup.get(
+            shift["datetime"]
+        )
+
+        if index is None:
+            continue
+
+        wanted = (
+            "bearish"
+            if shift["direction"] == "bullish"
+            else "bullish"
+        )
+
+        for j in range(
+            index - 1,
+            max(index - 10, -1),
+            -1,
+        ):
+
+            candle = bars[j]
+
+            color = (
+                "bullish"
+                if candle["close"] >= candle["open"]
+                else "bearish"
+            )
+
+            if color != wanted:
+                continue
+
+            blocks.append(
+                {
+                    "type": "order_block",
+                    "direction": shift["direction"],
+                    "price": (
+                        candle["low"]
+                        if shift["direction"] == "bullish"
+                        else candle["high"]
+                    ),
+                    "datetime": candle["datetime"],
+                    "notes": (
+                        f"Last {wanted} candle "
+                        f"before structure shift"
+                    ),
+                }
+            )
+
+            break
 
     return blocks
 
- def calculate_institutional_bias(
+
+# ============================================================
+# DEALING RANGE
+# ============================================================
+
+def calculate_dealing_range(
+    swings: list[dict],
+):
+
+    highs = [
+        s for s in swings
+        if s["type"] == "swing_high"
+    ]
+
+    lows = [
+        s for s in swings
+        if s["type"] == "swing_low"
+    ]
+
+    if not highs or not lows:
+        return None
+
+    high = highs[-1]["price"]
+    low = lows[-1]["price"]
+
+    equilibrium = (
+        high + low
+    ) / 2
+
+    return {
+        "high": high,
+        "low": low,
+        "equilibrium": equilibrium,
+    }
+
+
+# ============================================================
+# ICT OTE
+# ============================================================
+
+def calculate_ote(
+    dealing_range: dict,
+):
+
+    diff = (
+        dealing_range["high"]
+        - dealing_range["low"]
+    )
+
+    return {
+
+        "buy_ote_low":
+            dealing_range["high"] - diff * 0.79,
+
+        "buy_ote_high":
+            dealing_range["high"] - diff * 0.62,
+
+        "sell_ote_low":
+            dealing_range["low"] + diff * 0.62,
+
+        "sell_ote_high":
+            dealing_range["low"] + diff * 0.79,
+    }
+
+
+# ============================================================
+# PREMIUM / DISCOUNT
+# ============================================================
+
+def classify_price_location(
+    price: float,
+    dealing_range: dict,
+):
+
+    if price > dealing_range["equilibrium"]:
+        return "PREMIUM"
+
+    if price < dealing_range["equilibrium"]:
+        return "DISCOUNT"
+
+    return "EQUILIBRIUM"
+
+
+# ============================================================
+# INSTITUTIONAL BIAS
+# ============================================================
+
+def calculate_institutional_bias(
     structure: dict,
     signals: list[dict],
-) -> dict:
-    """
-    Produces the overall institutional bias.
-
-    Returns:
-        bias
-        confidence
-        score
-    """
+):
 
     score = 0
-
-    # -------------------------
-    # Market Structure
-    # -------------------------
 
     if structure["trend"] == "BULLISH":
         score += 40
@@ -252,48 +549,39 @@ def detect_order_blocks(bars: list[dict], shifts: list[dict]) -> list[dict]:
         score -= 40
 
     if structure["bos"]:
-        score += 15 if structure["trend"] == "BULLISH" else -15
+        score += (
+            15
+            if structure["trend"] == "BULLISH"
+            else -15
+        )
 
     if structure["choch"]:
-        score += 10 if structure["trend"] == "BULLISH" else -10
-
-    # -------------------------
-    # Signal Scoring
-    # -------------------------
+        score += (
+            10
+            if structure["trend"] == "BULLISH"
+            else -10
+        )
 
     for signal in signals:
 
-        if signal["type"] == "fair_value_gap":
+        value = 0
 
-            if signal["direction"] == "bullish":
-                score += 4
-            else:
-                score -= 4
+        if signal["type"] == "fair_value_gap":
+            value = 4
 
         elif signal["type"] == "liquidity_sweep":
-
-            if signal["direction"] == "bullish":
-                score += 8
-            else:
-                score -= 8
+            value = 8
 
         elif signal["type"] == "order_block":
-
-            if signal["direction"] == "bullish":
-                score += 10
-            else:
-                score -= 10
+            value = 10
 
         elif signal["type"] == "market_structure_shift":
+            value = 12
 
-            if signal["direction"] == "bullish":
-                score += 12
-            else:
-                score -= 12
-
-    # -------------------------
-    # Final Bias
-    # -------------------------
+        if signal["direction"] == "bullish":
+            score += value
+        else:
+            score -= value
 
     if score >= 40:
         bias = "BUY"
@@ -304,65 +592,98 @@ def detect_order_blocks(bars: list[dict], shifts: list[dict]) -> list[dict]:
     else:
         bias = "WAIT"
 
-    confidence = min(abs(score), 100)
-
     return {
+
         "bias": bias,
-        "confidence": confidence,
+
+        "confidence": min(
+            abs(score),
+            100,
+        ),
+
         "score": score,
     }
 
+# ============================================================
+# RUN ALL ICT DETECTORS
+# ============================================================
 
-def _run_all_detectors(bars: list[dict]) -> tuple[list[dict], dict]:
+def _run_all_detectors(
+    bars: list[dict],
+) -> tuple[list[dict], dict, dict | None]:
 
     swings = detect_swings(bars)
 
-   range_data = calculate_dealing_range(swings)
+    structure = classify_market_structure(swings)
 
-    structure = detect_market_structure(bars, swings)
+    dealing_range = calculate_dealing_range(swings)
 
+    shifts = detect_market_structure_shifts(
+        bars,
+        swings,
+    )
 
     signals = [
         *detect_fair_value_gaps(bars),
-        *detect_liquidity_sweeps(bars, swings),
-        *detect_market_structure_shifts(bars, swings),
-        *detect_order_blocks(bars,
-      detect_market_structure_shifts(bars, swings)),
+        *detect_liquidity_sweeps(
+            bars,
+            swings,
+        ),
+        *shifts,
+        *detect_order_blocks(
+            bars,
+            shifts,
+        ),
     ]
 
-    return signals, structure, range_data
+    return (
+        signals,
+        structure,
+        dealing_range,
+    )
 
 
-  def build_learning_record(
+# ============================================================
+# REINFORCEMENT LEARNING RECORD
+# ============================================================
+
+def build_learning_record(
     asset: str,
     structure: dict,
     bias: dict,
     signal: dict,
 ) -> dict:
-    """
-    Creates a reinforcement-learning record.
-    """
 
     return {
+
         "asset": asset,
+
         "timeframe": "1D",
 
         "prediction": bias["bias"],
+
         "confidence": bias["confidence"],
 
         "trend": structure["trend"],
+
         "trend_strength": structure["strength"],
 
         "bos": structure["bos"],
+
         "choch": structure["choch"],
+
         "mss": structure["mss"],
 
         "hh": structure["hh"],
+
         "hl": structure["hl"],
+
         "lh": structure["lh"],
+
         "ll": structure["ll"],
 
         "signal_type": signal["type"],
+
         "signal_direction": signal["direction"],
 
         "price": signal["price"],
@@ -379,17 +700,19 @@ def _run_all_detectors(bars: list[dict]) -> tuple[list[dict], dict]:
     }
 
 
+# ============================================================
+# EVALUATE REINFORCEMENT LEARNING
+# ============================================================
+
 async def evaluate_learning_records(
     look_forward_bars: int = 10,
 ) -> dict:
-    """
-    Evaluates pending reinforcement-learning records and assigns rewards.
-    """
 
     supabase = get_supabase()
 
     pending = (
-        supabase.table("reinforcement_learning")
+        supabase
+        .table("reinforcement_learning")
         .select("*")
         .eq("status", "PENDING")
         .execute()
@@ -402,14 +725,18 @@ async def evaluate_learning_records(
 
         asset = record["asset"]
 
-        bars = await get_stored_bars(asset, days_back=30)
+        bars = await get_stored_bars(
+            asset,
+            days_back=30,
+        )
 
         if not bars:
             continue
 
         future = [
-            b for b in bars
-            if b["datetime"] > record["detected_at"]
+            bar
+            for bar in bars
+            if bar["datetime"] > record["detected_at"]
         ]
 
         if len(future) < look_forward_bars:
@@ -419,218 +746,306 @@ async def evaluate_learning_records(
 
         entry = record["price"]
 
-        highest = max(x["high"] for x in future)
-        lowest = min(x["low"] for x in future)
+        highest = max(
+            x["high"]
+            for x in future
+        )
+
+        lowest = min(
+            x["low"]
+            for x in future
+        )
 
         prediction = record["prediction"]
 
-        reward = 0
+        reward = 0.0
+
         result = "LOSS"
+
         actual = "RANGE"
 
         if prediction == "BUY":
 
             if highest > entry:
+
                 reward = highest - entry
+
                 result = "WIN"
+
                 actual = "BUY"
 
             else:
+
                 reward = lowest - entry
+
                 actual = "SELL"
 
         elif prediction == "SELL":
 
             if lowest < entry:
+
                 reward = entry - lowest
+
                 result = "WIN"
+
                 actual = "SELL"
 
             else:
+
                 reward = entry - highest
+
                 actual = "BUY"
 
-        supabase.table("reinforcement_learning").update({
+        supabase.table(
+            "reinforcement_learning"
+        ).update(
 
-            "status": "COMPLETE",
+            {
 
-            "reward": reward,
+                "status": "COMPLETE",
 
-            "result": result,
+                "reward": reward,
 
-            "actual_direction": actual,
+                "result": result,
 
-        }).eq(
+                "actual_direction": actual,
+
+            }
+
+        ).eq(
+
             "id",
             record["id"],
+
         ).execute()
 
         evaluated += 1
 
     return {
-        "evaluated": evaluated
+
+        "evaluated": evaluated,
+
     }
 
+# ============================================================
+# RUN ALL ICT DETECTORS
+# ============================================================
 
-def calculate_dealing_range(swings: list[dict]) -> dict | None:
-    """
-    Uses the most recent confirmed swing high and swing low
-    to define the current dealing range.
-    """
+def _run_all_detectors(
+    bars: list[dict],
+) -> tuple[list[dict], dict, dict | None]:
 
-    highs = [s for s in swings if s["type"] == "swing_high"]
-    lows = [s for s in swings if s["type"] == "swing_low"]
+    swings = detect_swings(bars)
 
-    if not highs or not lows:
-        return None
+    structure = classify_market_structure(swings)
 
-    latest_high = highs[-1]
-    latest_low = lows[-1]
+    dealing_range = calculate_dealing_range(swings)
 
-    high = latest_high["price"]
-    low = latest_low["price"]
+    shifts = detect_market_structure_shifts(
+        bars,
+        swings,
+    )
 
-    premium = low + (high - low) * 0.5
+    signals = [
+        *detect_fair_value_gaps(bars),
+        *detect_liquidity_sweeps(
+            bars,
+            swings,
+        ),
+        *shifts,
+        *detect_order_blocks(
+            bars,
+            shifts,
+        ),
+    ]
+
+    return (
+        signals,
+        structure,
+        dealing_range,
+    )
+
+
+# ============================================================
+# REINFORCEMENT LEARNING RECORD
+# ============================================================
+
+def build_learning_record(
+    asset: str,
+    structure: dict,
+    bias: dict,
+    signal: dict,
+) -> dict:
 
     return {
-        "high": high,
-        "low": low,
-        "equilibrium": premium,
+
+        "asset": asset,
+
+        "timeframe": "1D",
+
+        "prediction": bias["bias"],
+
+        "confidence": bias["confidence"],
+
+        "trend": structure["trend"],
+
+        "trend_strength": structure["strength"],
+
+        "bos": structure["bos"],
+
+        "choch": structure["choch"],
+
+        "mss": structure["mss"],
+
+        "hh": structure["hh"],
+
+        "hl": structure["hl"],
+
+        "lh": structure["lh"],
+
+        "ll": structure["ll"],
+
+        "signal_type": signal["type"],
+
+        "signal_direction": signal["direction"],
+
+        "price": signal["price"],
+
+        "detected_at": signal["datetime"],
+
+        "status": "PENDING",
+
+        "actual_direction": None,
+
+        "result": None,
+
+        "reward": 0.0,
     }
 
 
-def calculate_ote(range_data: dict) -> dict:
-    """
-    ICT Optimal Trade Entry (62%-79% retracement zone).
-    """
+# ============================================================
+# EVALUATE REINFORCEMENT LEARNING
+# ============================================================
 
-    high = range_data["high"]
-    low = range_data["low"]
+async def evaluate_learning_records(
+    look_forward_bars: int = 10,
+) -> dict:
 
-    diff = high - low
-
-    return {
-        "buy_ote_low": high - diff * 0.79,
-        "buy_ote_high": high - diff * 0.62,
-        "sell_ote_low": low + diff * 0.62,
-        "sell_ote_high": low + diff * 0.79,
-    }
-
-
-def classify_price_location(price: float, range_data: dict) -> str:
-    """
-    Premium / Discount classification.
-    """
-
-    if price > range_data["equilibrium"]:
-        return "PREMIUM"
-
-    if price < range_data["equilibrium"]:
-        return "DISCOUNT"
-
-    return "EQUILIBRIUM"
-
-
-async def refresh_ict_signals(lookback_bars: int = 150) -> dict:
     supabase = get_supabase()
-    rows: list[dict] = []
-    learning_rows = []
-    errors: dict[str, str] = {}
 
-    for asset in ASSET_SYMBOLS:
-        try:
-            bars = await get_stored_bars(asset, days_back=lookback_bars * 2)  # calendar days, so bars comfortably cover lookback_bars trading days
-            if len(bars) < 2 * SWING_WINDOW + 1:
-                errors[asset] = "Not enough stored bars yet — run POST /api/market-data/refresh first."
-                continue
-            signals, structure = _run_all_detectors(bars)
-          bias = calculate_institutional_bias(
-              structure,
-              signals,
+    pending = (
+        supabase
+        .table("reinforcement_learning")
+        .select("*")
+        .eq("status", "PENDING")
+        .execute()
+        .data
+    )
+
+    evaluated = 0
+
+    for record in pending:
+
+        asset = record["asset"]
+
+        bars = await get_stored_bars(
+            asset,
+            days_back=30,
         )
-        except Exception as exc:  # noqa: BLE001
-            errors[asset] = str(exc)
+
+        if not bars:
             continue
 
-        for signal in signals:
-          learning_row = build_learning_record(
-              assets,
-              structure,
-              bias,
-              signal,
-          )
-            rows.append({
+        future = [
+            bar
+            for bar in bars
+            if bar["datetime"] > record["detected_at"]
+        ]
 
-    "asset": asset,
+        if len(future) < look_forward_bars:
+            continue
 
-    "timeframe": "1D",
+        future = future[:look_forward_bars]
 
-    "signal_type": signal["type"],
+        entry = record["price"]
 
-    "direction": signal["direction"],
+        highest = max(
+            x["high"]
+            for x in future
+        )
 
-    "price_level": signal["price"],
+        lowest = min(
+            x["low"]
+            for x in future
+        )
 
-    "detected_at": signal["datetime"],
+        prediction = record["prediction"]
 
-    "notes": signal.get("notes"),
+        reward = 0.0
 
-    "confidence": bias["confidence"],
+        result = "LOSS"
 
-    "institutional_bias": bias["bias"],
+        actual = "RANGE"
 
-    "market_trend": structure["trend"],
+        if prediction == "BUY":
 
-    "trend_strength": structure["strength"],
+            if highest > entry:
 
-    "premium_discount": price_location,
+                reward = highest - entry
 
-    "buy_ote_low": ote["buy_ote_low"],
+                result = "WIN"
 
-    "buy_ote_high": ote["buy_ote_high"],
+                actual = "BUY"
 
-    "sell_ote_low": ote["sell_ote_low"],
+            else:
 
-    "sell_ote_high": ote["sell_ote_high"],
+                reward = lowest - entry
 
-})
+                actual = "SELL"
 
-learning_row.append(
-    learning_row
-)
+        elif prediction == "SELL":
 
+            if lowest < entry:
 
-if learning_rows:
-  for i in range(0, len(learning_rows), 500):
+                reward = entry - lowest
 
-     supabase.table(
-        "reinforcement_learning"
-     ).upsert(
-        learning_rows[i:i+500]
-     ).execute()
+                result = "WIN"
 
-    if rows:
-        for i in range(0, len(rows), 500):
-            supabase.table("ict_signals").upsert(
-                rows[i : i + 500],
-                on_conflict="asset,timeframe,signal_type,direction,detected_at",
-            ).execute()
+                actual = "SELL"
 
-    return {"signals_inserted": len(rows), "assets_with_errors": errors}
+            else:
 
+                reward = entry - highest
 
-@ttl_cache(seconds=900)
-async def get_latest_signals(asset: str = "XAUUSD", limit: int = 20) -> list[dict]:
-    if asset not in ASSET_SYMBOLS:
-        raise ValueError(f"Unknown asset '{asset}'. Valid: {sorted(ASSET_SYMBOLS)}")
+                actual = "BUY"
 
-    supabase = get_supabase()
-    result = (
-        supabase.table("ict_signals")
-        .select("*")
-        .eq("asset", asset)
-        .order("detected_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    return result.data
+        supabase.table(
+            "reinforcement_learning"
+        ).update(
+
+            {
+
+                "status": "COMPLETE",
+
+                "reward": reward,
+
+                "result": result,
+
+                "actual_direction": actual,
+
+            }
+
+        ).eq(
+
+            "id",
+            record["id"],
+
+        ).execute()
+
+        evaluated += 1
+
+    return {
+
+        "evaluated": evaluated,
+
+    }
