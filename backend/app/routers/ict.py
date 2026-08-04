@@ -16,4 +16,13 @@ async def signals(asset: str = Query("XAUUSD", pattern="^(XAUUSD|NQ)$"), limit: 
 
 @router.post("/refresh", dependencies=[Depends(verify_refresh_token)])
 async def refresh():
-    return await ict_service.refresh_ict_signals()
+    """Runs the ICT detector suite, persists signals, then grades any
+    reinforcement-learning predictions that are now old enough to judge.
+    Both steps live behind this one endpoint because GitHub Actions'
+    scheduled-refresh workflow — the reliable trigger, per scheduler.py —
+    calls each module's /refresh endpoint once; the in-process scheduler
+    still runs them as two separate steps for its own defense-in-depth
+    pass."""
+    refresh_result = await ict_service.refresh_ict_signals()
+    learning_result = await ict_service.evaluate_learning_records()
+    return {**refresh_result, "reinforcement_learning": learning_result}
