@@ -17,6 +17,8 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useNav } from "@/components/layout/NavContext";
+
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/top-down", label: "Top-down analysis", icon: Telescope },
@@ -34,45 +36,62 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { open, setOpen } = useNav();
 
   return (
-    <nav className="flex w-60 shrink-0 flex-col border-r border-border bg-panel">
-      <div className="flex items-center gap-2 border-b border-border px-5 py-5">
-        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-          <polyline
-            points="1,16 6,10 10,13 15,5 21,8"
-            fill="none"
-            stroke="#C9A227"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span className="font-display text-[15px] font-medium leading-tight text-ink">
-          Macro Intelligence AI
-        </span>
-      </div>
+    <>
+      {/* Backdrop — mobile only, closes the drawer on tap outside it */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
 
-      <ul className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const active = href === "/" ? pathname === "/" : pathname?.startsWith(href);
-          return (
-            <li key={href}>
-              <Link
-                href={href}
-                className={`flex items-center gap-3 rounded px-3 py-2 text-sm transition-colors ${
-                  active
-                    ? "bg-gold/10 text-gold"
-                    : "text-muted hover:bg-white/5 hover:text-ink"
-                }`}
-              >
-                <Icon size={16} aria-hidden="true" />
-                {label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
+      <nav
+        className={`fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col border-r border-border bg-panel transition-transform duration-200 ease-out lg:static lg:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-center gap-2 border-b border-border px-5 py-5">
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+            <polyline
+              points="1,16 6,10 10,13 15,5 21,8"
+              fill="none"
+              stroke="#C9A227"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="font-display text-[15px] font-medium leading-tight text-ink">
+            Macro Intelligence AI
+          </span>
+        </div>
+
+        <ul className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
+          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+            const active = href === "/" ? pathname === "/" : pathname?.startsWith(href);
+            return (
+              <li key={href}>
+                <Link
+                  href={href}
+                  onClick={() => setOpen(false)}
+                  className={`flex items-center gap-3 rounded px-3 py-2 text-sm transition-colors ${
+                    active
+                      ? "bg-gold/10 text-gold"
+                      : "text-muted hover:bg-white/5 hover:text-ink"
+                  }`}
+                >
+                  <Icon size={16} aria-hidden="true" />
+                  {label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+    </>
   );
 }
