@@ -18,6 +18,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useNav } from "@/components/layout/NavContext";
+import { AccountStatus } from "@/components/layout/AccountStatus";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -91,6 +92,8 @@ export function Sidebar() {
             );
           })}
         </ul>
+
+        <AccountStatus />
       </nav>
     </>
   );
