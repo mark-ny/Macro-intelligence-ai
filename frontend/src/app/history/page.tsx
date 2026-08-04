@@ -37,7 +37,10 @@ export default async function HistoryPage() {
         ) : (
           <ul className="mt-3 space-y-2">
             {goldOutcomes.map((o) => (
-              <li key={o.id} className="flex items-center justify-between text-sm">
+              <li
+                key={o.id}
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/60 pb-2 text-sm last:border-0 last:pb-0"
+              >
                 <span className={OUTCOME_COLOR[o.outcome]}>{o.outcome}</span>
                 <span className="font-mono tabular text-ink">
                   {o.pnl_pct !== null ? `${o.pnl_pct.toFixed(2)}%` : "—"}
