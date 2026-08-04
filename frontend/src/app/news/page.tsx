@@ -30,9 +30,12 @@ export default async function NewsPage() {
         ) : (
           <ul className="mt-3 space-y-2">
             {calendar.map((event, i) => (
-              <li key={i} className="flex items-center justify-between text-sm">
-                <span className="text-ink">{event.release_name}</span>
-                <span className="font-mono text-xs text-muted tabular">{event.scheduled_at}</span>
+              <li
+                key={i}
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm"
+              >
+                <span className="min-w-0 text-ink">{event.release_name}</span>
+                <span className="shrink-0 font-mono text-xs text-muted tabular">{event.scheduled_at}</span>
               </li>
             ))}
           </ul>
@@ -57,7 +60,7 @@ export default async function NewsPage() {
                 >
                   {item.headline}
                 </a>
-                <div className="mt-1 flex gap-3 text-xs text-muted">
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
                   <span>{item.source}</span>
                   <span className={SENTIMENT_COLOR[item.sentiment]}>{item.sentiment}</span>
                   <span>{item.related_asset}</span>
