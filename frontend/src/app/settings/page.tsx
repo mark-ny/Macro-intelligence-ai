@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/client";
 
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,7 +30,7 @@ export default function SettingsPage() {
 
     supabase.auth.getUser().then(async ({ data, error: userError }) => {
       if (userError || !data.user) {
-        setError("Log in to manage your settings.");
+        setNeedsLogin(true);
         return;
       }
       setUserId(data.user.id);
@@ -61,11 +63,19 @@ export default function SettingsPage() {
       </div>
 
       <section className="max-w-md space-y-4 rounded border border-border bg-panel p-5">
+        {needsLogin && (
+          <p className="text-sm text-muted">
+            <Link href="/login" className="text-gold hover:underline">
+              Log in
+            </Link>{" "}
+            to manage your settings.
+          </p>
+        )}
         {error && <p className="text-sm text-negative">{error}</p>}
 
-        {!error && !settings && <p className="text-sm text-muted">Loading…</p>}
+        {!needsLogin && !error && !settings && <p className="text-sm text-muted">Loading…</p>}
 
-        {!error && settings && (
+        {!needsLogin && !error && settings && (
           <>
             <label className="block">
               <span className="text-sm text-muted">Risk tolerance</span>
