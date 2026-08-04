@@ -33,6 +33,20 @@ from app.services.market_data_service import (
 
 SWING_WINDOW = 3
 
+# How much history to run the detectors over on each refresh. Wide enough
+# for meaningful swing/structure context, narrow enough that institutional
+# bias reflects current conditions rather than every signal since 2020.
+REFRESH_LOOKBACK_DAYS = 180
+
+# Signals upsert on the dedup key migration 0002 already defines
+# (ict_signals_dedup_uidx); reinforcement_learning upserts on the
+# equivalent key added for it in
+# supabase/migrations/0005_ict_signals_upgrade.sql. Both exist so
+# re-running refresh_ict_signals() on unchanged history is a no-op
+# instead of piling up duplicate rows every scheduler tick.
+_SIGNALS_CONFLICT_KEY = "asset,timeframe,signal_type,direction,detected_at"
+_LEARNING_CONFLICT_KEY = "asset,timeframe,signal_type,signal_direction,detected_at"
+
 
 # ============================================================
 # SWING DETECTION
@@ -827,225 +841,129 @@ async def evaluate_learning_records(
 
     }
 
-# ============================================================
-# RUN ALL ICT DETECTORS
-# ============================================================
-
-def _run_all_detectors(
-    bars: list[dict],
-) -> tuple[list[dict], dict, dict | None]:
-
-    swings = detect_swings(bars)
-
-    structure = classify_market_structure(swings)
-
-    dealing_range = calculate_dealing_range(swings)
-
-    shifts = detect_market_structure_shifts(
-        bars,
-        swings,
-    )
-
-    signals = [
-        *detect_fair_value_gaps(bars),
-        *detect_liquidity_sweeps(
-            bars,
-            swings,
-        ),
-        *shifts,
-        *detect_order_blocks(
-            bars,
-            shifts,
-        ),
-    ]
-
-    return (
-        signals,
-        structure,
-        dealing_range,
-    )
-
 
 # ============================================================
-# REINFORCEMENT LEARNING RECORD
+# SIGNAL ROW BUILDER (ict_signals table shape)
 # ============================================================
 
-def build_learning_record(
+def _build_signal_row(
     asset: str,
+    timeframe: str,
+    signal: dict,
     structure: dict,
     bias: dict,
-    signal: dict,
+    ote: dict | None,
+    premium_discount: str | None,
 ) -> dict:
-
+    """Shapes one detector signal into an ict_signals row. The
+    structure/bias/OTE/premium-discount fields are the same for every
+    signal produced by one refresh — they're the market context the
+    signal was detected under, not per-signal values."""
     return {
-
         "asset": asset,
-
-        "timeframe": "1D",
-
-        "prediction": bias["bias"],
-
-        "confidence": bias["confidence"],
-
-        "trend": structure["trend"],
-
-        "trend_strength": structure["strength"],
-
-        "bos": structure["bos"],
-
-        "choch": structure["choch"],
-
-        "mss": structure["mss"],
-
-        "hh": structure["hh"],
-
-        "hl": structure["hl"],
-
-        "lh": structure["lh"],
-
-        "ll": structure["ll"],
-
+        "timeframe": timeframe,
         "signal_type": signal["type"],
-
-        "signal_direction": signal["direction"],
-
-        "price": signal["price"],
-
+        "direction": signal["direction"],
+        "price_level": signal["price"],
         "detected_at": signal["datetime"],
-
-        "status": "PENDING",
-
-        "actual_direction": None,
-
-        "result": None,
-
-        "reward": 0.0,
+        "notes": signal.get("notes"),
+        "confidence": bias["confidence"],
+        "institutional_bias": bias["bias"],
+        "market_trend": structure["trend"],
+        "trend_strength": structure["strength"],
+        "premium_discount": premium_discount,
+        "buy_ote_low": ote["buy_ote_low"] if ote else None,
+        "buy_ote_high": ote["buy_ote_high"] if ote else None,
+        "sell_ote_low": ote["sell_ote_low"] if ote else None,
+        "sell_ote_high": ote["sell_ote_high"] if ote else None,
     }
 
 
 # ============================================================
-# EVALUATE REINFORCEMENT LEARNING
+# REFRESH — run detectors, persist signals + RL records
 # ============================================================
 
-async def evaluate_learning_records(
-    look_forward_bars: int = 10,
-) -> dict:
+async def refresh_ict_signals(timeframe: str = "1D") -> dict:
+    """Runs the full ICT detector suite for every tracked asset over the
+    last REFRESH_LOOKBACK_DAYS of stored bars, then upserts:
+      - one row per detected signal into ict_signals (with the
+        institutional-bias/premium-discount/OTE context attached), and
+      - one pending prediction per signal into reinforcement_learning,
+        later graded by evaluate_learning_records().
 
+    Both tables upsert on a natural key (asset, signal type/direction,
+    detected_at) so re-running this on unchanged history is a no-op
+    instead of piling up duplicate rows every scheduler tick.
+    """
     supabase = get_supabase()
+    results: dict[str, dict] = {}
 
-    pending = (
-        supabase
-        .table("reinforcement_learning")
-        .select("*")
-        .eq("status", "PENDING")
-        .execute()
-        .data
-    )
+    for asset in ASSET_SYMBOLS:
+        bars = await get_stored_bars(asset, days_back=REFRESH_LOOKBACK_DAYS)
 
-    evaluated = 0
-
-    for record in pending:
-
-        asset = record["asset"]
-
-        bars = await get_stored_bars(
-            asset,
-            days_back=30,
-        )
-
-        if not bars:
+        if len(bars) < SWING_WINDOW * 2 + 1:
+            results[asset] = {"signals": 0, "learning_records": 0, "note": "not enough bars yet"}
             continue
 
-        future = [
-            bar
-            for bar in bars
-            if bar["datetime"] > record["detected_at"]
+        signals, structure, dealing_range = _run_all_detectors(bars)
+        bias = calculate_institutional_bias(structure, signals)
+        ote = calculate_ote(dealing_range) if dealing_range else None
+        premium_discount = (
+            classify_price_location(bars[-1]["close"], dealing_range)
+            if dealing_range
+            else None
+        )
+
+        signal_rows = [
+            _build_signal_row(asset, timeframe, signal, structure, bias, ote, premium_discount)
+            for signal in signals
+        ]
+        learning_rows = [
+            build_learning_record(asset, structure, bias, signal)
+            for signal in signals
         ]
 
-        if len(future) < look_forward_bars:
-            continue
+        for i in range(0, len(signal_rows), 500):
+            supabase.table("ict_signals").upsert(
+                signal_rows[i : i + 500],
+                on_conflict=_SIGNALS_CONFLICT_KEY,
+                ignore_duplicates=True,
+            ).execute()
 
-        future = future[:look_forward_bars]
+        for i in range(0, len(learning_rows), 500):
+            supabase.table("reinforcement_learning").upsert(
+                learning_rows[i : i + 500],
+                on_conflict=_LEARNING_CONFLICT_KEY,
+                ignore_duplicates=True,
+            ).execute()
 
-        entry = record["price"]
+        results[asset] = {
+            "signals": len(signal_rows),
+            "learning_records": len(learning_rows),
+            "trend": structure["trend"],
+            "institutional_bias": bias["bias"],
+            "confidence": bias["confidence"],
+            "premium_discount": premium_discount,
+        }
 
-        highest = max(
-            x["high"]
-            for x in future
-        )
+    return {"timeframe": timeframe, "assets": results}
 
-        lowest = min(
-            x["low"]
-            for x in future
-        )
 
-        prediction = record["prediction"]
+# ============================================================
+# GET LATEST SIGNALS
+# ============================================================
 
-        reward = 0.0
-
-        result = "LOSS"
-
-        actual = "RANGE"
-
-        if prediction == "BUY":
-
-            if highest > entry:
-
-                reward = highest - entry
-
-                result = "WIN"
-
-                actual = "BUY"
-
-            else:
-
-                reward = lowest - entry
-
-                actual = "SELL"
-
-        elif prediction == "SELL":
-
-            if lowest < entry:
-
-                reward = entry - lowest
-
-                result = "WIN"
-
-                actual = "SELL"
-
-            else:
-
-                reward = entry - highest
-
-                actual = "BUY"
-
-        supabase.table(
-            "reinforcement_learning"
-        ).update(
-
-            {
-
-                "status": "COMPLETE",
-
-                "reward": reward,
-
-                "result": result,
-
-                "actual_direction": actual,
-
-            }
-
-        ).eq(
-
-            "id",
-            record["id"],
-
-        ).execute()
-
-        evaluated += 1
-
-    return {
-
-        "evaluated": evaluated,
-
-    }
+@ttl_cache(seconds=900)
+async def get_latest_signals(asset: str, limit: int = 20) -> list[dict]:
+    """Most recent persisted ict_signals rows for an asset, newest first —
+    what GET /api/ict/signals and the ICT analysis page read."""
+    supabase = get_supabase()
+    result = (
+        supabase.table("ict_signals")
+        .select("*")
+        .eq("asset", asset)
+        .order("detected_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return result.data
