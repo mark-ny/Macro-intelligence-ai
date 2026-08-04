@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -13,6 +13,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [currentEmail, setCurrentEmail] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => setCurrentEmail(data.user?.email ?? null));
+  }, []);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -29,6 +35,38 @@ export default function LoginPage() {
     }
     router.push("/");
     router.refresh();
+  }
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setCurrentEmail(null);
+    router.refresh();
+  }
+
+  if (currentEmail) {
+    return (
+      <div className="mx-auto max-w-sm">
+        <h1 className="font-display text-2xl font-medium text-ink">Log in</h1>
+        <p className="mt-3 text-sm text-muted">
+          You&apos;re logged in as <span className="text-ink">{currentEmail}</span>.
+        </p>
+        <div className="mt-6 flex gap-3">
+          <Link
+            href="/settings"
+            className="rounded bg-gold px-4 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90"
+          >
+            Go to settings
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="rounded border border-border px-4 py-2 text-sm text-ink transition-colors hover:bg-white/5"
+          >
+            Log out
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
