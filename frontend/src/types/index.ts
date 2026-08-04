@@ -67,6 +67,15 @@ export interface IctSignal {
   price_level: number | null;
   detected_at: string;
   notes: string | null;
+  confidence: number | null;
+  institutional_bias: "BUY" | "SELL" | "WAIT" | null;
+  market_trend: "BULLISH" | "BEARISH" | "RANGE" | null;
+  trend_strength: number | null;
+  premium_discount: "PREMIUM" | "DISCOUNT" | "EQUILIBRIUM" | null;
+  buy_ote_low: number | null;
+  buy_ote_high: number | null;
+  sell_ote_low: number | null;
+  sell_ote_high: number | null;
 }
 
 export interface AiDecision {
