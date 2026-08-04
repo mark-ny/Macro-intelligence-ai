@@ -1,52 +1,88 @@
-"""Central settings. Loaded once and cached so every module shares one instance."""
-import json
-from functools import lru_cache
+"""Optional in-process scheduler.
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+IMPORTANT — read this before relying on it: Render's free web service tier
+spins down after 15 minutes with no incoming HTTP request. A sleeping
+process fires no cron jobs at all, in-process or otherwise. So the
+*reliable* trigger for scheduled refreshes is the GitHub Actions workflow
+in .github/workflows/scheduled-refresh.yml, which calls each /*/refresh
+endpoint over HTTP in dependency order — that same traffic is also what
+wakes the service back up and keeps Supabase from pausing.
 
+This in-process scheduler is kept as a defense-in-depth layer for whenever
+the service happens to already be awake, so data still refreshes without
+waiting for the next GitHub Actions tick. Do not depend on it alone.
+"""
+import logging
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
-    environment: str = "development"
-    cors_origins: list[str] = ["http://localhost:3000"]
+from app.services import (
+    ai_decision_service,
+    big_picture_service,
+    dxy_service,
+    history_service,
+    ict_service,
+    intermediate_service,
+    market_data_service,
+    news_service,
+    notifications_service,
+    performance_service,
+    rates_service,
+    short_term_service,
+    treasury_service,
+)
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _parse_cors_origins(cls, value):
-        """Render env vars are plain strings. Accept either a JSON array
-        ('["https://a.com","https://b.com"]') or a plain comma-separated
-        list ('https://a.com,https://b.com') so a misformatted env var
-        can't crash startup — it used to require strict JSON and raise a
-        pydantic ValidationError before the app ever got a chance to run."""
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return []
-            if stripped.startswith("["):
-                return json.loads(stripped)
-            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
-        return value
-
-    # Supabase
-    supabase_url: str = ""
-    supabase_service_key: str = ""
-
-    # Data providers (free tiers — see README for signup links)
-    fred_api_key: str = ""
-    twelvedata_api_key: str = ""
-    currents_api_key: str = ""
-
-    # Shared secret checked on POST /*/refresh so GitHub Actions (and only
-    # GitHub Actions) can trigger background refreshes. Also doubles as the
-    # keep-warm ping that stops Render's free web service from sleeping and
-    # Supabase's free project from pausing after 7 idle days.
-    refresh_token: str = "change-me"
-
-    cache_ttl_seconds: int = 900  # 15 minutes
+logger = logging.getLogger(__name__)
+scheduler = AsyncIOScheduler()
 
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
+async def run_full_refresh_chain() -> None:
+    """Runs every module in dependency order: raw data first (including
+    the shared market_prices bars everything else in this list reads
+    from), then the three Top-Down Analysis perspectives, then AI Decision
+    (which reads all of it), then Historical Learning (grades old
+    decisions), then Performance and Notifications (read the results of
+    both)."""
+    steps = [
+        ("treasury", treasury_service.refresh_treasury_data),
+        ("rates", rates_service.refresh_rates_data),
+        ("dxy", dxy_service.refresh_dxy_data),
+        ("news", news_service.refresh_news_data),
+        ("market_data", market_data_service.refresh_market_prices),
+        ("ict", ict_service.refresh_ict_signals),
+        ("ict_reinforcement_learning", ict_service.evaluate_learning_records),
+        ("cpi", big_picture_service.refresh_cpi_data),
+        ("commodity_index", big_picture_service.refresh_commodity_index),
+        ("macro_regime", big_picture_service.compute_macro_regime),
+        ("seasonality", big_picture_service.refresh_seasonality),
+        ("topdown_bias", intermediate_service.refresh_topdown_bias),
+        ("cot", intermediate_service.refresh_cot_data),
+        ("correlations", short_term_service.compute_correlations),
+        ("ipda_ranges", short_term_service.refresh_ipda_ranges),
+        ("ai_decision", ai_decision_service.refresh_ai_decisions),
+        ("history", history_service.evaluate_pending_decisions),
+        ("performance", performance_service.refresh_performance_metrics),
+        ("notifications", notifications_service.refresh_notifications),
+    ]
+    for name, fn in steps:
+        try:
+            await fn()
+        except Exception:  # noqa: BLE001 — one module failing shouldn't block the rest
+            logger.exception("Scheduled refresh step '%s' failed", name)
+
+
+def start_scheduler() -> None:
+    scheduler.add_job(
+        run_full_refresh_chain,
+        CronTrigger(hour="1,13,19", minute=0),
+        id="run_full_refresh_chain",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.start()
+
+
+def shutdown_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
