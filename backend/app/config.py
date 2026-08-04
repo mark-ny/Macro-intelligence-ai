@@ -1,5 +1,8 @@
 """Central settings. Loaded once and cached so every module shares one instance."""
+import json
 from functools import lru_cache
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +11,23 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value):
+        """Render env vars are plain strings. Accept either a JSON array
+        ('["https://a.com","https://b.com"]') or a plain comma-separated
+        list ('https://a.com,https://b.com') so a misformatted env var
+        can't crash startup — it used to require strict JSON and raise a
+        pydantic ValidationError before the app ever got a chance to run."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+        return value
 
     # Supabase
     supabase_url: str = ""
