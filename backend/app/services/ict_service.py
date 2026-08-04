@@ -38,12 +38,13 @@ SWING_WINDOW = 3
 # bias reflects current conditions rather than every signal since 2020.
 REFRESH_LOOKBACK_DAYS = 180
 
-# Signals upsert on the dedup key migration 0002 already defines
-# (ict_signals_dedup_uidx); reinforcement_learning upserts on the
-# equivalent key added for it in
-# supabase/migrations/0005_ict_signals_upgrade.sql. Both exist so
-# re-running refresh_ict_signals() on unchanged history is a no-op
-# instead of piling up duplicate rows every scheduler tick.
+# Both tables upsert on a natural key (asset, timeframe, signal
+# type/direction, detected_at) instead of always inserting, so re-running
+# refresh_ict_signals() doesn't pile up duplicate rows for signals whose
+# underlying bar data hasn't changed. ict_signals is a full upsert — every
+# refresh overwrites the bias/trend/OTE context with the latest snapshot.
+# reinforcement_learning instead upserts with ignore_duplicates=True so an
+# already-graded record's status/reward is never reset back to PENDING.
 _SIGNALS_CONFLICT_KEY = "asset,timeframe,signal_type,direction,detected_at"
 _LEARNING_CONFLICT_KEY = "asset,timeframe,signal_type,signal_direction,detected_at"
 
@@ -923,13 +924,20 @@ async def refresh_ict_signals(timeframe: str = "1D") -> dict:
             for signal in signals
         ]
 
+        # ict_signals: full upsert (ignore_duplicates NOT set) — every
+        # refresh should overwrite the bias/trend/OTE context on existing
+        # rows with the latest snapshot. Unlike reinforcement_learning
+        # below, there's no "already graded" state here worth protecting.
         for i in range(0, len(signal_rows), 500):
             supabase.table("ict_signals").upsert(
                 signal_rows[i : i + 500],
                 on_conflict=_SIGNALS_CONFLICT_KEY,
-                ignore_duplicates=True,
             ).execute()
 
+        # reinforcement_learning: ignore_duplicates=True — once a record
+        # has been graded (status flips PENDING -> COMPLETE with a
+        # reward/result), re-running refresh on the same historical
+        # signal must NOT overwrite that grade back to a fresh PENDING.
         for i in range(0, len(learning_rows), 500):
             supabase.table("reinforcement_learning").upsert(
                 learning_rows[i : i + 500],
