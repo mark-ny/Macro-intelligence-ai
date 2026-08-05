@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/client";
 import { FormField } from "@/components/ui/FormField";
 
 export default function SignupPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,13 +21,26 @@ export default function SignupPage() {
     setError(null);
 
     const supabase = createClient();
-    const { error: signUpError } = await supabase.auth.signUp({ email, password });
+    const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
 
     setLoading(false);
     if (signUpError) {
       setError(signUpError.message);
       return;
     }
+
+    // With "Confirm email" off in Supabase, signUp() returns an active
+    // session immediately — the account is already usable, so send them
+    // straight into the app instead of showing a "check your email"
+    // screen for an email that was never sent. With confirmation on,
+    // no session comes back yet and the check-your-email screen below
+    // is the correct state — this works either way without a code change.
+    if (data.session) {
+      router.push("/");
+      router.refresh();
+      return;
+    }
+
     setSent(true);
   }
 
