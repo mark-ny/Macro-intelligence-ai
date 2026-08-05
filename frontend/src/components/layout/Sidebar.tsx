@@ -8,11 +8,13 @@ import {
   History,
   Landmark,
   LayoutDashboard,
+  Menu,
   Newspaper,
   Percent,
   Settings,
   Banknote,
   Telescope,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -41,6 +43,20 @@ export function Sidebar() {
 
   return (
     <>
+      {/* Mobile menu toggle — lives here (not in Topbar) so this button and
+          the drawer it controls are compiled as one client component
+          instead of two separate files crossing a nested server/client
+          boundary. Fixed-positioned to sit visually inside the top bar. */}
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-label={open ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={open}
+        className="fixed left-4 top-4 z-50 flex h-9 w-9 items-center justify-center rounded text-ink hover:bg-white/5 lg:hidden"
+      >
+        {open ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
+      </button>
+
       {/* Backdrop — mobile only, closes the drawer on tap outside it */}
       {open && (
         <div
