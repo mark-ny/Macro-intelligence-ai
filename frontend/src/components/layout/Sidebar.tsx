@@ -76,7 +76,7 @@ export function Sidebar() {
             <polyline
               points="1,16 6,10 10,13 15,5 21,8"
               fill="none"
-              stroke="#C9A227"
+              stroke="rgb(var(--color-gold))"
               strokeWidth="1.6"
               strokeLinecap="round"
               strokeLinejoin="round"
