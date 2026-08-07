@@ -12,8 +12,8 @@
    rgb(var(--x) / <alpha-value>) pattern in tailwind.config.ts can apply
    opacity modifiers like bg-gold/10. Dark is the default and also what
    unthemed/no-JS visitors see; [data-theme="light"] overrides it. Every
-   existing bg-*/text-*/border-* class in the app already resolves through
-   these variables, so adding the light values here is what makes the
+   existing bg-, text-, and border- class in the app already resolves
+   through these variables, so adding the light values here is what makes the
    whole app theme-aware — no other component needed to change for this. */
 :root,
 [data-theme="dark"] {
