@@ -4,6 +4,7 @@ import { IBM_Plex_Mono, Inter, Source_Serif_4 } from "next/font/google";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { NavProvider } from "@/components/layout/NavContext";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
 
@@ -34,6 +35,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+      <head>
+        {/* Runs before hydration to set data-theme from localStorage,
+            avoiding a flash of the default (dark) theme for users who
+            picked light. See src/lib/theme.ts. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="overflow-x-hidden font-sans antialiased">
         <NavProvider>
           <div className="flex min-h-screen bg-bg text-ink">
