@@ -8,9 +8,41 @@
   --font-mono: "IBM Plex Mono", monospace;
 }
 
+/* Color tokens as "R G B" triplets (not hex) so Tailwind's
+   rgb(var(--x) / <alpha-value>) pattern in tailwind.config.ts can apply
+   opacity modifiers like bg-gold/10. Dark is the default and also what
+   unthemed/no-JS visitors see; [data-theme="light"] overrides it. Every
+   existing bg-*/text-*/border-* class in the app already resolves through
+   these variables, so adding the light values here is what makes the
+   whole app theme-aware — no other component needed to change for this. */
+:root,
+[data-theme="dark"] {
+  --color-bg: 11 14 20;
+  --color-panel: 18 22 31;
+  --color-border: 35 40 56;
+  --color-ink: 232 227 216;
+  --color-muted: 139 147 167;
+  --color-gold: 201 162 39;
+  --color-steel: 76 143 192;
+  --color-positive: 91 140 90;
+  --color-negative: 179 80 58;
+}
+
+[data-theme="light"] {
+  --color-bg: 246 244 239;
+  --color-panel: 255 255 255;
+  --color-border: 222 217 204;
+  --color-ink: 27 30 36;
+  --color-muted: 100 107 122;
+  --color-gold: 150 117 28;
+  --color-steel: 43 102 144;
+  --color-positive: 63 107 62;
+  --color-negative: 140 59 40;
+}
+
 body {
-  background-color: #0B0E14;
-  color: #E8E3D8;
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-ink));
 }
 
 /* Tabular numerals everywhere prices/yields appear, so digits align in
@@ -20,6 +52,6 @@ body {
 }
 
 ::selection {
-  background-color: #C9A227;
-  color: #0B0E14;
+  background-color: rgb(var(--color-gold));
+  color: rgb(var(--color-bg));
 }
