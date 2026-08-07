@@ -28,6 +28,26 @@ def _get_all_user_ids(supabase) -> list[str]:
     return [u.id for u in users]
 
 
+def _filter_by_pref(supabase, user_ids: list[str], pref_key: str) -> list[str]:
+    """Drops users who've opted out of this notification category via
+    Settings (user_settings.notification_prefs, wired up in
+    frontend/src/app/settings/page.tsx). No settings row, or no explicit
+    False for this key, means still enabled — opt-out, not opt-in, so
+    existing users keep getting notifications after this was added."""
+    if not user_ids:
+        return []
+    result = (
+        supabase.table("user_settings")
+        .select("user_id, notification_prefs")
+        .in_("user_id", user_ids)
+        .execute()
+    )
+    opted_out = {
+        row["user_id"] for row in result.data if (row.get("notification_prefs") or {}).get(pref_key) is False
+    }
+    return [uid for uid in user_ids if uid not in opted_out]
+
+
 def _already_notified_recently(supabase, notif_type: str, hours: int = 24) -> bool:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     result = (
@@ -125,10 +145,16 @@ async def check_upcoming_calendar_events(supabase, user_ids: list[str]) -> int:
 
 async def refresh_notifications() -> dict:
     supabase = get_supabase()
-    user_ids = _get_all_user_ids(supabase)
+    all_user_ids = _get_all_user_ids(supabase)
 
     return {
-        "curve_inversion": await check_curve_inversion(supabase, user_ids),
-        "ai_decision_changes": await check_ai_decision_changes(supabase, user_ids),
-        "calendar_events": await check_upcoming_calendar_events(supabase, user_ids),
+        "curve_inversion": await check_curve_inversion(
+            supabase, _filter_by_pref(supabase, all_user_ids, "curve_inversion")
+        ),
+        "ai_decision_changes": await check_ai_decision_changes(
+            supabase, _filter_by_pref(supabase, all_user_ids, "ai_decision_changes")
+        ),
+        "calendar_events": await check_upcoming_calendar_events(
+            supabase, _filter_by_pref(supabase, all_user_ids, "calendar_events")
+        ),
     }
