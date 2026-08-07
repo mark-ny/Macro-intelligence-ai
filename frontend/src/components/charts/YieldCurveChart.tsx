@@ -10,6 +10,29 @@ import {
 
 import type { YieldHistoryPoint } from "@/types";
 
+/**
+ * Reads a color token's "R G B" triplet from the live CSS custom property
+ * (see src/app/globals.css) rather than hardcoding hex — lightweight-charts
+ * renders to a <canvas>, so it can't resolve CSS variables itself the way
+ * a bg-* Tailwind class can; this is what makes the chart follow the
+ * dark/light theme instead of staying stuck on one palette.
+ */
+function cssVarTriplet(name: string): string {
+  if (typeof window === "undefined") return "0 0 0";
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "0 0 0";
+}
+
+function chartColors() {
+  const gold = cssVarTriplet("--color-gold").split(" ").join(",");
+  return {
+    text: `rgb(${cssVarTriplet("--color-muted")})`,
+    grid: `rgb(${cssVarTriplet("--color-border")})`,
+    lineColor: `rgb(${cssVarTriplet("--color-gold")})`,
+    topColor: `rgba(${gold},0.28)`,
+    bottomColor: `rgba(${gold},0.0)`,
+  };
+}
+
 interface Props {
   data: YieldHistoryPoint[];
   height?: number;
@@ -29,25 +52,26 @@ export function YieldCurveChart({ data, height = 280 }: Props) {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const colors = chartColors();
     const chart = createChart(containerRef.current, {
       height,
       layout: {
         background: { color: "transparent" },
-        textColor: "#8B93A7",
+        textColor: colors.text,
         fontFamily: "var(--font-mono)",
       },
       grid: {
-        vertLines: { color: "#232838" },
-        horzLines: { color: "#232838" },
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
       },
-      rightPriceScale: { borderColor: "#232838" },
-      timeScale: { borderColor: "#232838" },
+      rightPriceScale: { borderColor: colors.grid },
+      timeScale: { borderColor: colors.grid },
     });
 
     const series = chart.addSeries(AreaSeries, {
-      lineColor: "#C9A227",
-      topColor: "rgba(201, 162, 39, 0.28)",
-      bottomColor: "rgba(201, 162, 39, 0.0)",
+      lineColor: colors.lineColor,
+      topColor: colors.topColor,
+      bottomColor: colors.bottomColor,
       lineWidth: 2,
     });
 
@@ -60,8 +84,27 @@ export function YieldCurveChart({ data, height = 280 }: Props) {
     });
     resizeObserver.observe(containerRef.current);
 
+    // Re-applies colors immediately if the user flips the theme (Settings
+    // page) while this chart is mounted, instead of only on next load.
+    const themeObserver = new MutationObserver(() => {
+      const next = chartColors();
+      chart.applyOptions({
+        layout: { textColor: next.text },
+        grid: { vertLines: { color: next.grid }, horzLines: { color: next.grid } },
+        rightPriceScale: { borderColor: next.grid },
+        timeScale: { borderColor: next.grid },
+      });
+      series.applyOptions({
+        lineColor: next.lineColor,
+        topColor: next.topColor,
+        bottomColor: next.bottomColor,
+      });
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
     return () => {
       resizeObserver.disconnect();
+      themeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
