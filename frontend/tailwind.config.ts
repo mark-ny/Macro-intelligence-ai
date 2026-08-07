@@ -5,15 +5,15 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: "#0B0E14",
-        panel: "#12161F",
-        border: "#232838",
-        ink: "#E8E3D8",
-        muted: "#8B93A7",
-        gold: "#C9A227",
-        steel: "#4C8FC0",
-        positive: "#5B8C5A",
-        negative: "#B3503A",
+        bg: "rgb(var(--color-bg) / <alpha-value>)",
+        panel: "rgb(var(--color-panel) / <alpha-value>)",
+        border: "rgb(var(--color-border) / <alpha-value>)",
+        ink: "rgb(var(--color-ink) / <alpha-value>)",
+        muted: "rgb(var(--color-muted) / <alpha-value>)",
+        gold: "rgb(var(--color-gold) / <alpha-value>)",
+        steel: "rgb(var(--color-steel) / <alpha-value>)",
+        positive: "rgb(var(--color-positive) / <alpha-value>)",
+        negative: "rgb(var(--color-negative) / <alpha-value>)",
       },
       fontFamily: {
         display: ["var(--font-display)"],
