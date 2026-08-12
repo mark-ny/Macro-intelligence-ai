@@ -4,6 +4,7 @@ import { IBM_Plex_Mono, Inter, Source_Serif_4 } from "next/font/google";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { NavProvider } from "@/components/layout/NavContext";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
         </NavProvider>
+        <ChatWidget />
       </body>
     </html>
   );
