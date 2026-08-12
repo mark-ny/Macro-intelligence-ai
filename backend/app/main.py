@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.scheduler import shutdown_scheduler, start_scheduler
 from app.routers import (
     ai_decision,
+    chat,
     dxy,
     history,
     ict,
@@ -57,6 +58,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["Not
 app.include_router(performance.router, prefix="/api/performance", tags=["Performance"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(top_down.router, prefix="/api/top-down", tags=["Top-Down Analysis"])
+app.include_router(chat.router, prefix="/api/chat", tags=["AI Assistant"])
 
 
 @app.get("/api/health", tags=["Health"])
