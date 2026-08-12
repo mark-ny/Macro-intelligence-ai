@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     twelvedata_api_key: str = ""
     currents_api_key: str = ""
 
+    # AI assistant (chat widget) — Gemini Flash via the Google GenAI API.
+    # Empty string disables the widget gracefully (see chat_service.py)
+    # instead of crashing startup.
+    gemini_api_key: str = ""
+
     # Shared secret checked on POST /*/refresh so GitHub Actions (and only
     # GitHub Actions) can trigger background refreshes. Also doubles as the
     # keep-warm ping that stops Render's free web service from sleeping and
