@@ -38,7 +38,13 @@ SYSTEM_PROMPT = (
     "if someone asks for a trade recommendation. Keep answers concise."
 )
 
-TOOLS = [
+# Individual function declarations, grouped into one Tool below. The
+# Gemini SDK's Tool model only accepts specific top-level keys
+# (function_declarations, google_search, code_execution, ...) — passing a
+# bare {"name": ..., "description": ..., "parameters": ...} dict directly
+# in the tools list, as earlier, fails pydantic validation with
+# "Extra inputs are not permitted" on each of those keys.
+FUNCTION_DECLARATIONS = [
     {
         "name": "get_market_snapshot",
         "description": (
@@ -80,6 +86,8 @@ TOOLS = [
         },
     },
 ]
+
+TOOLS = [{"function_declarations": FUNCTION_DECLARATIONS}]
 
 
 def _safe_json(value):
