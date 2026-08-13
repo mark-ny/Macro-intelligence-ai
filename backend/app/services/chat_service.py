@@ -18,7 +18,15 @@ from google import genai
 from google.genai import types
 
 from app.config import get_settings
-from app.services import ai_decision_service, ict_service, news_service
+from app.services import (
+    ai_decision_service,
+    dxy_service,
+    history_service,
+    ict_service,
+    news_service,
+    performance_service,
+    treasury_service,
+)
 
 MAX_TOKENS = 700
 MAX_HISTORY_MESSAGES = 12
@@ -29,10 +37,10 @@ SYSTEM_PROMPT = (
     "Gold (XAU/USD) and Nasdaq (NQ, proxied via QQQ since real futures data requires a "
     "paid feed) using ICT-style technical analysis, macro data (Treasury yields, DXY, "
     "economic calendar), and a rules-based AI decision engine. You help visitors "
-    "understand what the dashboard is showing.\n\n"
+    "understand what the dashboard is showing, including its own track record.\n\n"
     "Always use your tools to pull real, current data before answering questions about "
-    "live prices, signals, decisions, or upcoming events — never guess or invent numbers. "
-    "If a tool returns nothing, say so plainly.\n\n"
+    "live prices, signals, decisions, macro conditions, performance, or upcoming events — "
+    "never guess or invent numbers. If a tool returns nothing, say so plainly.\n\n"
     "You are not a financial advisor and this isn't financial advice — say so naturally "
     "if someone asks for a trade recommendation. Keep answers concise."
 )
@@ -84,6 +92,34 @@ FUNCTION_DECLARATIONS = [
             },
         },
     },
+    {
+        "name": "get_macro_snapshot",
+        "description": (
+            "The current Treasury yield curve (2Y/10Y spread, inversion status) and DXY "
+            "(dollar index) snapshot with trend forecast. Use for questions about the "
+            "macro backdrop, yield curve inversion, or dollar strength."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_performance_stats",
+        "description": (
+            "The AI decision engine's track record for an asset: win rate and performance "
+            "metrics (total return, max drawdown, etc) from historical outcomes. Use when "
+            "asked how well the system has performed, its accuracy, or its win rate."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "asset": {
+                    "type": "string",
+                    "enum": ["XAUUSD", "NQ"],
+                    "description": "XAUUSD for gold, NQ for Nasdaq",
+                },
+            },
+            "required": ["asset"],
+        },
+    },
 ]
 
 TOOLS = [{"function_declarations": FUNCTION_DECLARATIONS}]
@@ -118,6 +154,17 @@ async def _run_tool(name: str, tool_input: dict) -> dict | list:
         limit = tool_input.get("limit", 8)
         headlines = await news_service.get_headlines(limit=limit)
         return _safe_json(headlines)
+
+    if name == "get_macro_snapshot":
+        yield_curve = await treasury_service.get_yield_curve()
+        dxy = await dxy_service.get_dxy_snapshot()
+        return _safe_json({"yield_curve": yield_curve, "dxy": dxy})
+
+    if name == "get_performance_stats":
+        asset = tool_input.get("asset", "XAUUSD")
+        performance = await performance_service.get_performance_summary(asset)
+        win_rate = await history_service.get_win_rate(asset)
+        return _safe_json({"asset": asset, "performance": performance, "win_rate": win_rate})
 
     return {"error": f"unknown tool '{name}'"}
 

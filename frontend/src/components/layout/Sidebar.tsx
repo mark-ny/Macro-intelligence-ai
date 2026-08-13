@@ -3,6 +3,7 @@
 import {
   BarChart3,
   Bell,
+  Bot,
   BrainCircuit,
   CandlestickChart,
   History,
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { href: "/history", label: "Historical learning", icon: History },
   { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/notifications", label: "Notifications", icon: Bell },
+  { href: "/assistant", label: "AI Assistant", icon: Bot },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
