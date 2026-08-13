@@ -1,15 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { MessageCircle, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { Maximize2, MessageCircle, Send, Trash2, X } from "lucide-react";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const MAX_HISTORY_MESSAGES = 12; // mirrors the backend's own trim — keeps the request body small
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+import { useChat } from "@/lib/useChat";
 
 const SUGGESTIONS = [
   "What's the AI decision on gold right now?",
@@ -18,54 +14,27 @@ const SUGGESTIONS = [
 ];
 
 export function ChatWidget() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { messages, loading, error, sendMessage, clearConversation } = useChat();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  function scrollToBottom() {
+  useEffect(() => {
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     });
-  }
+  }, [messages, loading]);
 
-  async function sendMessage(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || loading) return;
+  // The full-page assistant already shows this same conversation —
+  // no need for the floating version on top of it too.
+  if (pathname === "/assistant") return null;
 
-    const next = [...messages, { role: "user" as const, content: trimmed }];
-    setMessages(next);
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const text = input;
     setInput("");
-    setError(null);
-    setLoading(true);
-    scrollToBottom();
-
-    try {
-      const res = await fetch(`${BASE_URL}/api/chat/message`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.slice(-MAX_HISTORY_MESSAGES) }),
-      });
-
-      if (res.status === 429) {
-        setError("Too many messages — try again in a bit.");
-        return;
-      }
-      if (!res.ok) {
-        setError("The assistant hit a problem. Try again in a moment.");
-        return;
-      }
-
-      const data = await res.json();
-      setMessages([...next, { role: "assistant", content: data.reply }]);
-    } catch {
-      setError("Couldn't reach the assistant — check your connection.");
-    } finally {
-      setLoading(false);
-      scrollToBottom();
-    }
+    sendMessage(text);
   }
 
   return (
@@ -74,14 +43,29 @@ export function ChatWidget() {
         <div className="fixed bottom-20 right-4 z-50 flex h-[28rem] w-[calc(100vw-2rem)] max-w-sm flex-col rounded border border-border bg-panel shadow-xl sm:right-6">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <span className="font-display text-sm font-medium text-ink">AI Assistant</span>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label="Close chat"
-              className="text-muted hover:text-ink"
-            >
-              <X size={18} aria-hidden="true" />
-            </button>
+            <div className="flex items-center gap-3">
+              <Link href="/assistant" aria-label="Open full assistant page" className="text-muted hover:text-ink">
+                <Maximize2 size={15} aria-hidden="true" />
+              </Link>
+              {messages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearConversation}
+                  aria-label="Clear conversation"
+                  className="text-muted hover:text-ink"
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close chat"
+                className="text-muted hover:text-ink"
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
           </div>
 
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -120,13 +104,7 @@ export function ChatWidget() {
             {error && <div className="text-xs text-negative">{error}</div>}
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              sendMessage(input);
-            }}
-            className="flex items-center gap-2 border-t border-border p-3"
-          >
+          <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border p-3">
             <input
               type="text"
               value={input}
