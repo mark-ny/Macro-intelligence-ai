@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Empty string disables the widget gracefully (see chat_service.py)
     # instead of crashing startup.
     gemini_api_key: str = ""
+    # Overridable without a code change (Render → Environment → GEMINI_MODEL)
+    # since Google has been retiring Gemini model generations fast in 2026 —
+    # a future deprecation becomes a one-line env var edit instead of a redeploy.
+    gemini_model: str = "gemini-3.5-flash-lite"
 
     # Shared secret checked on POST /*/refresh so GitHub Actions (and only
     # GitHub Actions) can trigger background refreshes. Also doubles as the

@@ -20,7 +20,6 @@ from google.genai import types
 from app.config import get_settings
 from app.services import ai_decision_service, ict_service, news_service
 
-MODEL = "gemini-2.5-flash"
 MAX_TOKENS = 700
 MAX_HISTORY_MESSAGES = 12
 MAX_TOOL_ROUNDS = 4
@@ -149,7 +148,7 @@ async def get_chat_response(messages: list[dict]) -> str:
     )
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = await client.aio.models.generate_content(model=MODEL, contents=contents, config=config)
+        response = await client.aio.models.generate_content(model=settings.gemini_model, contents=contents, config=config)
 
         candidate_content = response.candidates[0].content
         function_calls = [p.function_call for p in candidate_content.parts if p.function_call]
