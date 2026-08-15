@@ -6,6 +6,7 @@ import type {
   HistoricalOutcome,
   IctSignal,
   IntermediateSummary,
+  IpdaDataRanges,
   NewsHeadline,
   OpenFloatAnalysis,
   PerformanceSummary,
@@ -98,5 +99,10 @@ export const api = {
   macroAnalysis: {
     openFloat: (asset: string) =>
       apiGet<OpenFloatAnalysis>(`/api/macro-analysis/open-float?asset=${asset}`),
+  },
+
+  ipda: {
+    dataRanges: (symbol: string) =>
+      apiGet<IpdaDataRanges>(`/api/ipda/data-ranges?symbol=${symbol}`),
   },
 };

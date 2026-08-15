@@ -23,6 +23,7 @@ from app.services import (
     dxy_service,
     history_service,
     ict_service,
+    ipda_service,
     news_service,
     open_float_service,
     performance_service,
@@ -143,6 +144,31 @@ FUNCTION_DECLARATIONS = [
             "required": ["asset"],
         },
     },
+    {
+        "name": "get_ipda_data_ranges",
+        "description": (
+            "IPDA (Interbank Price Delivery Algorithm) analysis for an asset: the ~3-4 "
+            "month institutional range, smart-money accumulation/distribution patterns "
+            "versus a benchmark (DXY for gold, 10Y yield for Nasdaq), quarterly structure "
+            "at 20/40/60 trading-day windows, institutional reference points (old highs/"
+            "lows, order blocks, fair value gaps), the previous major market shift, "
+            "projected 20/40/60-day cast-forward time windows, and Open Float at the same "
+            "20/40/60-day windows. Use this for any question about IPDA ranges, smart money "
+            "buy/sell programs, benchmark divergence, institutional reference points, or "
+            "cast-forward projections."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "asset": {
+                    "type": "string",
+                    "enum": ["XAUUSD", "NQ"],
+                    "description": "XAUUSD for gold, NQ for Nasdaq",
+                },
+            },
+            "required": ["asset"],
+        },
+    },
 ]
 
 TOOLS = [{"function_declarations": FUNCTION_DECLARATIONS}]
@@ -192,6 +218,10 @@ async def _run_tool(name: str, tool_input: dict) -> dict | list:
     if name == "get_open_float_analysis":
         asset = tool_input.get("asset", "XAUUSD")
         return _safe_json(await open_float_service.get_open_float_analysis(asset))
+
+    if name == "get_ipda_data_ranges":
+        asset = tool_input.get("asset", "XAUUSD")
+        return _safe_json(await ipda_service.get_ipda_data_ranges(asset))
 
     return {"error": f"unknown tool '{name}'"}
 

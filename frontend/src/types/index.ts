@@ -206,6 +206,85 @@ export interface IpdaRange {
   as_of: string;
 }
 
+export interface IpdaLevel {
+  price?: number;
+  level?: number;
+  date?: string;
+  datetime?: string;
+  distance?: number;
+  pct_distance?: number;
+  status?: string;
+  mitigation_status?: string;
+  filled?: boolean;
+}
+
+export interface IpdaSmartMoneyPattern {
+  pattern: string;
+  classification: string;
+  underlying_structure?: { label: string; price: number; datetime: string };
+  benchmark_structure?: { label: string; price: number; datetime: string };
+  direction?: string;
+  datetime?: string;
+  notes?: string;
+  status: string;
+}
+
+export interface IpdaWindow {
+  trading_days?: number;
+  high?: number;
+  low?: number;
+  open?: number;
+  close?: number;
+  range?: number;
+  structure?: string;
+  major_swing_highs?: IpdaLevel[];
+  major_swing_lows?: IpdaLevel[];
+  most_recent_shift?: { direction: string; price: number; datetime: string; notes: string } | null;
+  status?: string;
+}
+
+export interface IpdaOpenFloatWindow {
+  high?: number;
+  low?: number;
+  buy_stops?: IpdaLevel;
+  sell_stops?: IpdaLevel;
+  status?: string;
+}
+
+export interface IpdaDataRanges {
+  symbol: string;
+  benchmark: string;
+  current_price: number;
+  as_of: string;
+  ipda_range: { start: string; end: string; trading_days: number; high: number; low: number };
+  smart_money: {
+    buy_program: IpdaSmartMoneyPattern[] | string;
+    sell_program: IpdaSmartMoneyPattern[] | string;
+  };
+  quarterly_shift: {
+    "20d": IpdaWindow;
+    "40d": IpdaWindow;
+    "60d": IpdaWindow;
+    last_major_shift: { direction: string; price: number; datetime: string; notes: string } | null;
+  };
+  institutional_reference_points: {
+    bullish_order_blocks: IpdaLevel[];
+    bearish_order_blocks: IpdaLevel[];
+    fair_value_gaps: IpdaLevel[];
+    old_highs: IpdaLevel[];
+    old_lows: IpdaLevel[];
+  };
+  previous_market_shift: { direction: string; price: number; datetime: string; notes: string } | null;
+  cast_forward: Record<string, { trading_days_from_shift: number; estimated_date: string; note: string } | string>;
+  open_float: {
+    near_term_20d: IpdaOpenFloatWindow;
+    short_term_40d: IpdaOpenFloatWindow;
+    intermediate_60d: IpdaOpenFloatWindow;
+  };
+  interpretation: string;
+  error?: string;
+}
+
 export interface ShortTermSummary {
   asset: string;
   correlations: CorrelationEntry[];

@@ -124,6 +124,8 @@ def detect_fair_value_gaps(
                         previous["high"]
                         + nxt["low"]
                     ) / 2,
+                    "high": nxt["low"],
+                    "low": previous["high"],
                     "datetime": current["datetime"],
                     "notes": (
                         f"Gap between "
@@ -144,6 +146,8 @@ def detect_fair_value_gaps(
                         previous["low"]
                         + nxt["high"]
                     ) / 2,
+                    "high": previous["low"],
+                    "low": nxt["high"],
                     "datetime": current["datetime"],
                     "notes": (
                         f"Gap between "
@@ -451,6 +455,8 @@ def detect_order_blocks(
                         if shift["direction"] == "bullish"
                         else candle["high"]
                     ),
+                    "high": candle["high"],
+                    "low": candle["low"],
                     "datetime": candle["datetime"],
                     "notes": (
                         f"Last {wanted} candle "
