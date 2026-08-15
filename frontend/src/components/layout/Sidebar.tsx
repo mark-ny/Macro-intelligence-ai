@@ -15,6 +15,7 @@ import {
   Settings,
   Banknote,
   Telescope,
+  Waves,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,6 +27,7 @@ import { AccountStatus } from "@/components/layout/AccountStatus";
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/top-down", label: "Top-down analysis", icon: Telescope },
+  { href: "/macro-analysis", label: "Macro Analysis", icon: Waves },
   { href: "/treasury", label: "Treasury", icon: Landmark },
   { href: "/rates", label: "Interest rates", icon: Percent },
   { href: "/news", label: "Economic news", icon: Newspaper },

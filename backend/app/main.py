@@ -11,6 +11,7 @@ from app.routers import (
     dxy,
     history,
     ict,
+    macro_analysis,
     market_data,
     news,
     notifications,
@@ -53,6 +54,7 @@ app.include_router(dxy.router, prefix="/api/dxy", tags=["DXY"])
 app.include_router(market_data.router, prefix="/api/market-data", tags=["Market Data"])
 app.include_router(ict.router, prefix="/api/ict", tags=["ICT Analysis"])
 app.include_router(ai_decision.router, prefix="/api/ai-decision", tags=["AI Decision"])
+app.include_router(macro_analysis.router, prefix="/api/macro-analysis", tags=["Macro Analysis"])
 app.include_router(history.router, prefix="/api/history", tags=["Historical Learning"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(performance.router, prefix="/api/performance", tags=["Performance"])

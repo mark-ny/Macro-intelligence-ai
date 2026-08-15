@@ -212,3 +212,50 @@ export interface ShortTermSummary {
   time_and_price: TimeAndPrice;
   ipda_ranges: IpdaRange[];
 }
+
+export interface OpenFloatLevel {
+  label?: string;
+  price: number;
+  date: string;
+  distance: number;
+  pct_distance: number;
+  importance?: string;
+  liquidity_status?: string;
+  sweep_status: "UNTOUCHED" | "SWEPT";
+}
+
+export interface QuarterlyShift {
+  direction: "bullish" | "bearish" | "neutral";
+  notes: string;
+  current_quarter_high: number | null;
+  current_quarter_low: number | null;
+  price_position: string;
+}
+
+export interface OpenFloatAnalysis {
+  asset: string;
+  current_price: number;
+  as_of: string;
+  quarterly_shift: QuarterlyShift;
+  buy_side: {
+    last_bearish_shift: OpenFloatLevel | "Data unavailable";
+    short_term_highs: OpenFloatLevel[];
+    three_month_high: OpenFloatLevel | "Data unavailable";
+    six_month_high: OpenFloatLevel | "Data unavailable";
+    twelve_month_high: OpenFloatLevel | "Data unavailable";
+  };
+  sell_side: {
+    last_bullish_shift: OpenFloatLevel | "Data unavailable";
+    short_term_lows: OpenFloatLevel[];
+    three_month_low: OpenFloatLevel | "Data unavailable";
+    six_month_low: OpenFloatLevel | "Data unavailable";
+    twelve_month_low: OpenFloatLevel | "Data unavailable";
+  };
+  nearest_buy_side: OpenFloatLevel | null;
+  nearest_sell_side: OpenFloatLevel | null;
+  dominant_liquidity_side: "BUY_SIDE" | "SELL_SIDE" | "BALANCED";
+  buy_side_score: number;
+  sell_side_score: number;
+  interpretation: string;
+  error?: string;
+}

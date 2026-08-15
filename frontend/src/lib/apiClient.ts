@@ -7,6 +7,7 @@ import type {
   IctSignal,
   IntermediateSummary,
   NewsHeadline,
+  OpenFloatAnalysis,
   PerformanceSummary,
   RateSnapshot,
   ShortTermSummary,
@@ -92,5 +93,10 @@ export const api = {
       apiGet<IntermediateSummary>(`/api/top-down/intermediate?asset=${asset}`),
     shortTerm: (asset: string) =>
       apiGet<ShortTermSummary>(`/api/top-down/short-term?asset=${asset}`),
+  },
+
+  macroAnalysis: {
+    openFloat: (asset: string) =>
+      apiGet<OpenFloatAnalysis>(`/api/macro-analysis/open-float?asset=${asset}`),
   },
 };

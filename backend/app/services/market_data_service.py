@@ -104,18 +104,22 @@ async def get_stored_bars(asset: str, days_back: int | None = None) -> list[dict
 
 
 def resample_bars(bars: list[dict], period: str) -> list[dict]:
-    """Aggregates ascending daily bars into weekly ('1W') or monthly ('1M')
-    OHLC — used by both the Intermediate perspective's top-down bias (three
-    lenses on the same detectors) and the Short-Term perspective's
-    previous-week/previous-month reference levels, so both features stay
-    consistent with each other by construction."""
+    """Aggregates ascending daily bars into weekly ('1W'), monthly ('1M'),
+    or quarterly ('1Q') OHLC — used by the Intermediate perspective's
+    top-down bias, the Short-Term perspective's previous-week/month
+    reference levels, and Open Float's Quarterly Shift analysis, so all
+    three stay consistent with each other by construction."""
     from collections import defaultdict as _defaultdict
 
     if period == "1D":
         return bars
 
     def key_fn(d: datetime):
-        return d.isocalendar()[:2] if period == "1W" else (d.year, d.month)
+        if period == "1W":
+            return d.isocalendar()[:2]
+        if period == "1Q":
+            return (d.year, (d.month - 1) // 3)  # calendar quarter, not a candle count
+        return (d.year, d.month)
 
     groups: dict[tuple, list[dict]] = _defaultdict(list)
     for bar in bars:

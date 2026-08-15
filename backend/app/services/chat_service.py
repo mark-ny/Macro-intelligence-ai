@@ -24,6 +24,7 @@ from app.services import (
     history_service,
     ict_service,
     news_service,
+    open_float_service,
     performance_service,
     treasury_service,
 )
@@ -120,6 +121,28 @@ FUNCTION_DECLARATIONS = [
             "required": ["asset"],
         },
     },
+    {
+        "name": "get_open_float_analysis",
+        "description": (
+            "Quarterly Shift & Open Float analysis for an asset: the current quarterly "
+            "structural bias, and where buy-side (above price) and sell-side (below price) "
+            "protective liquidity currently sits — short-term swing highs/lows, and 3/6/12-"
+            "month highs/lows — each with distance from current price and whether it's "
+            "already been swept. Use this for any question about liquidity pools, stop "
+            "hunts, where price might be 'reaching for', or which side has more open float."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "asset": {
+                    "type": "string",
+                    "enum": ["XAUUSD", "NQ"],
+                    "description": "XAUUSD for gold, NQ for Nasdaq",
+                },
+            },
+            "required": ["asset"],
+        },
+    },
 ]
 
 TOOLS = [{"function_declarations": FUNCTION_DECLARATIONS}]
@@ -165,6 +188,10 @@ async def _run_tool(name: str, tool_input: dict) -> dict | list:
         performance = await performance_service.get_performance_summary(asset)
         win_rate = await history_service.get_win_rate(asset)
         return _safe_json({"asset": asset, "performance": performance, "win_rate": win_rate})
+
+    if name == "get_open_float_analysis":
+        asset = tool_input.get("asset", "XAUUSD")
+        return _safe_json(await open_float_service.get_open_float_analysis(asset))
 
     return {"error": f"unknown tool '{name}'"}
 
