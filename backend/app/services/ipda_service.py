@@ -43,6 +43,17 @@ TRADING_DAY_WINDOWS = (20, 40, 60)
 # analysis already pulls from rather than adding a new data source.
 BENCHMARK_MAP = {"XAUUSD": "USDX", "NQ": "US10Y"}
 
+# Whether each benchmark is positively or inversely correlated with its
+# underlying — determines which swing types get compared, and which
+# direction of non-confirmation means what. Confirmed via ICT/SMT
+# sourcing: DXY is explicitly taught as gold's inverse-correlated
+# benchmark; 10Y yields have shown a consistent inverse relationship with
+# rate-sensitive Nasdaq/growth names since 2022. (ICT's own textbook
+# choice for Nasdaq specifically is the positively-correlated ES/SPX —
+# not used here since this app doesn't store S&P 500 data; US10Y is a
+# reasonable inverse substitute given what's already available.)
+BENCHMARK_CORRELATION = {"USDX": "inverse", "US10Y": "inverse"}
+
 # ~5 trading sessions per calendar week -> used only to *estimate* a
 # calendar date for Cast Forward windows, since there's no live trading
 # calendar/holiday feed available; the trading-day count itself (the
@@ -145,40 +156,61 @@ def _detect_manipulation(underlying_bars: list[dict], benchmark_bars: list[dict]
     }
 
 
-def _smart_money_programs(underlying_swings: list[dict], benchmark_swings: list[dict]) -> dict:
+def _smart_money_programs(underlying_swings: list[dict], benchmark_swings: list[dict], correlation: str) -> dict:
+    """Correlation-direction-aware SMT divergence, per ICT sourcing:
+
+    Inverse pairs (this app's actual case — DXY for gold, 10Y for
+    Nasdaq): bullish when the benchmark fails to confirm a new high (LH)
+    while the underlying sweeps to a new low (LL) it "shouldn't" have on
+    its own; bearish when the benchmark fails to confirm a new low (HL)
+    while the underlying sweeps to a new high (LH, not HH) it shouldn't
+    have. The underlying's sweep is "the manipulated leg."
+
+    Positive pairs (kept correct here too even though not currently used,
+    since a future benchmark change shouldn't silently need this fixed
+    again): bullish when the underlying sweeps to LL while the benchmark
+    holds at HL (refuses to confirm); bearish the mirror at highs.
+    """
     u_high, u_low = _latest(underlying_swings, "swing_high"), _latest(underlying_swings, "swing_low")
     b_high, b_low = _latest(benchmark_swings, "swing_high"), _latest(benchmark_swings, "swing_low")
 
-    buy_patterns, sell_patterns = [], []
+    buy_program, sell_program = [], []
 
-    def _record(patterns: list, label: str, name: str, u_ref: dict, b_ref: dict):
+    def _record(patterns: list, name: str, u_ref: dict, b_ref: dict, note: str):
         patterns.append(
             {
-                "pattern": label,
                 "classification": name,
                 "underlying_structure": {"label": u_ref["label"], "price": u_ref["price"], "datetime": u_ref["datetime"]},
                 "benchmark_structure": {"label": b_ref["label"], "price": b_ref["price"], "datetime": b_ref["datetime"]},
+                "notes": note,
                 "status": "unconfirmed",
             }
         )
 
-    # Buy Program
-    if b_low and u_low and b_low["label"] == "LL" and u_low["label"] == "HL":
-        _record(buy_patterns, "B", "BUY PROGRAM / ACCUMULATION", u_low, b_low)
-    if u_low and b_high and u_low["label"] == "LL" and b_high["label"] == "LH":
-        _record(buy_patterns, "C", "Potential accumulation / relative divergence", u_low, b_high)
-    if b_high and u_low and b_high["label"] == "HH" and u_low["label"] == "HL":
-        _record(buy_patterns, "D", "Potential accumulation condition", u_low, b_high)
+    if correlation == "inverse":
+        if b_high and u_low and b_high["label"] == "LH" and u_low["label"] == "LL":
+            _record(
+                buy_program, "BUY PROGRAM / ACCUMULATION", u_low, b_high,
+                "Benchmark failed to confirm a new high (inverse pair) while underlying swept to a new low",
+            )
+        if b_low and u_high and b_low["label"] == "HL" and u_high["label"] == "LH":
+            _record(
+                sell_program, "SELL PROGRAM / DISTRIBUTION", u_high, b_low,
+                "Benchmark failed to confirm a new low (inverse pair) while underlying swept to a new high",
+            )
+    else:
+        if u_low and b_low and u_low["label"] == "LL" and b_low["label"] == "HL":
+            _record(
+                buy_program, "BUY PROGRAM / ACCUMULATION", u_low, b_low,
+                "Underlying swept to a new low the positively-correlated benchmark refused to confirm",
+            )
+        if u_high and b_high and u_high["label"] == "HH" and b_high["label"] == "LH":
+            _record(
+                sell_program, "SELL PROGRAM / DISTRIBUTION", u_high, b_high,
+                "Underlying swept to a new high the positively-correlated benchmark refused to confirm",
+            )
 
-    # Sell Program
-    if b_high and u_high and b_high["label"] == "HH" and u_high["label"] == "LH":
-        _record(sell_patterns, "B", "SELL PROGRAM / DISTRIBUTION", u_high, b_high)
-    if u_high and b_low and u_high["label"] == "HH" and b_low["label"] == "HL":
-        _record(sell_patterns, "C", "Potential distribution", u_high, b_low)
-    if b_low and u_high and b_low["label"] == "LL" and u_high["label"] == "LH":
-        _record(sell_patterns, "D", "Potential sell-program condition", u_high, b_low)
-
-    return {"buy_program": buy_patterns, "sell_program": sell_patterns}
+    return {"buy_program": buy_program, "sell_program": sell_program}
 
 
 def _window_analysis(bars: list[dict], window: int) -> dict:
@@ -385,7 +417,9 @@ async def get_ipda_data_ranges(symbol: str) -> dict:
         benchmark_swings = _label_swings(
             detect_swings(benchmark_bars[-u_window:], window=min(3, (u_window - 1) // 2) or 1)
         )
-        smart_money = _smart_money_programs(underlying_swings, benchmark_swings)
+        smart_money = _smart_money_programs(
+            underlying_swings, benchmark_swings, BENCHMARK_CORRELATION.get(benchmark_symbol, "positive")
+        )
         manipulation = _detect_manipulation(primary_range_bars, benchmark_bars)
         if manipulation:
             (smart_money["buy_program"] if manipulation["direction"] == "bullish" else smart_money["sell_program"]).insert(
